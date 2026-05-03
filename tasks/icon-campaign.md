@@ -201,7 +201,52 @@ These need user authorization -- the autonomous loop did NOT touch them:
 5. **Manual curation** for the top-N most-deployed apps -- highest
    leverage per hour.
 
-### Code changes shipped during the campaign
+## Gap-fill pass (post-campaign, 2026-05-03)
+
+Added two new web tiers to `fetch-web-icons.mjs` (commit `90a6b14b`):
+- **Microsoft Store DisplayCatalog** for msstore-source apps (`9...` IDs)
+- **Homepage scrape** for apple-touch-icon / og:image / twitter:image
+
+### Run [`25285170514`](https://github.com/ugurkocde/IntuneGet/actions/runs/25285170514)
+
+Default mode (targets `has_icon IS NULL OR has_icon=false`), `max_apps=5000`,
+`skip_binary=true`.
+
+| Tier              | Hits |
+|-------------------|------|
+| Microsoft Store   |  11  |
+| GitHub avatars    |  28  |
+| Homepage images   |   4  |
+| Favicons          |   2  |
+| No icon found     | 123  |
+| Total processed   | 182  |
+
+Bot commit `093c9fe5`: 45 newly-iconed apps (40 with full 256-px tier,
+5 with sub-256 sources only). Net effect on coverage was small because
+the catalog pool also grew by ~45 apps in the same window.
+
+### Coverage at end of gap-fill
+
+- Total app icon directories: **12,041** (up from 11,996)
+- Apps with `icon-256.png`: **10,473** (up from 10,433)
+- **Coverage: 87.0%** -- essentially flat, still short of the 90% target.
+
+### Why the gap-fill barely moved the needle
+
+The default-mode query only targets apps with `has_icon=false`. The
+real bulk of the remaining gap is apps that already have an icon but
+only at <= 128 px (binary_exe with low-res payload, mostly). Those are
+tagged `has_icon=true` and were NOT included in this run.
+
+Closing the rest of the gap would need either:
+- A new mode that runs the new tiers (Microsoft Store, homepage scrape)
+  on apps with `has_icon=true AND icon_source LIKE 'binary_%' AND missing
+  icon-256.png` -- this would replace some existing wrapper-PE icons
+  with crisper sources from the web. Quality call.
+- `force_refresh=true` on the binary tier (user must authorize -- it
+  re-downloads installers and rewrites every existing icon).
+
+## Code changes shipped during the campaign
 
 - `f3dbe228` fix: load app icon from public/icons path
 - `be1ecdc2` feat: produce 256px app icons and prefer them on upload
@@ -212,5 +257,7 @@ These need user authorization -- the autonomous loop did NOT touch them:
 - `60c772d3` ci: tolerate platform-specific lock drift in binary icon job
 - `fa698b54` fix: stop losing icon commits to autostash conflicts and orphan files
 - `a87da7b1` ci: add deterministic ordering + offset pagination to top-up query
+- `90a6b14b` feat: add Microsoft Store and homepage-image tiers to web icon fetcher
+- `7302de78` ci: bump web-icon job timeout to 120m
 
 Plus the corresponding edits in `IntuneGet-Workflows` (the active workflow repo).
