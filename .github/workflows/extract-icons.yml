@@ -34,6 +34,10 @@ on:
         required: false
         default: 'false'
         type: boolean
+      start_offset:
+        description: 'Pagination offset for missing-sizes-only mode (winget_id-ordered). Use to walk through the binary tier batch by batch.'
+        required: false
+        default: '0'
 
 # Prevent concurrent runs that could cause git conflicts
 # Use same group as build-app-list and sync-manifests to ensure sequential execution
@@ -298,6 +302,7 @@ jobs:
           APP_IDS: ${{ github.event.inputs.app_ids || 'all' }}
           FORCE_REFRESH: ${{ github.event.inputs.force_refresh || 'false' }}
           MISSING_SIZES_ONLY: ${{ github.event.inputs.missing_sizes_only || 'false' }}
+          START_OFFSET: ${{ github.event.inputs.start_offset || '0' }}
           MAX_APPS: ${{ env.MAX_APPS }}
         shell: bash
         run: |
@@ -312,6 +317,7 @@ jobs:
           const forceRefresh = process.env.FORCE_REFRESH === 'true';
           const missingSizesOnly = process.env.MISSING_SIZES_ONLY === 'true';
           const maxApps = parseInt(process.env.MAX_APPS) || 100;
+          const startOffset = parseInt(process.env.START_OFFSET) || 0;
           const TARGET_SIZES = [32, 64, 128, 256];
 
           if (!supabaseUrl || !supabaseKey) {
@@ -334,9 +340,16 @@ jobs:
             if (missingSizesOnly) {
               // Top-up mode: target apps that already have a binary-sourced icon.
               // Web-sourced icons are handled by the fetch-web-icons job.
+              // Use deterministic ordering + range so we can walk through the
+              // entire binary tier batch by batch via the start_offset input.
+              // Without an explicit order, Supabase returned the same heap-order
+              // rows every call, leaving us spinning on apps whose source was
+              // < 256 px and could never produce a new icon-256.png.
               query = query
                 .eq('has_icon', true)
-                .like('icon_source', 'binary_%');
+                .like('icon_source', 'binary_%')
+                .order('winget_id', { ascending: true })
+                .range(startOffset, startOffset + maxApps - 1);
             } else {
               if (!forceRefresh) {
                 query = query.or('has_icon.is.null,has_icon.eq.false');
@@ -345,9 +358,8 @@ jobs:
               if (!forceRefresh) {
                 query = query.or('icon_extraction_attempts.is.null,icon_extraction_attempts.lt.3');
               }
+              query = query.limit(maxApps);
             }
-
-            query = query.limit(maxApps);
 
             const { data: apps, error } = await query;
 
