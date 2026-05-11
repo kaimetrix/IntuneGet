@@ -49,7 +49,7 @@ export function PackageDetails({ package: pkg, onClose }: PackageDetailsProps) {
   ) || installers[0];
 
   const inCart = selectedInstaller
-    ? isInCart(pkg.id, selectedVersion, selectedInstaller.architecture)
+    ? isInCart(pkg.id, selectedVersion, selectedInstaller.architecture, selectedScope)
     : false;
 
   useEffect(() => {

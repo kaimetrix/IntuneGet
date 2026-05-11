@@ -231,9 +231,9 @@ export function PackageConfig({ package: pkg, installers, onClose, isDeployed = 
   const selectedInstaller = installers.find((i) => i.architecture === selectedArch) || installers[0];
   const availableArchitectures = [...new Set(installers.map((i) => i.architecture))];
   const inCart = isStoreApp
-    ? isInCart(pkg.packageIdentifier || pkg.id, selectedVersion)
+    ? isInCart(pkg.packageIdentifier || pkg.id, selectedVersion, undefined, storeInstallExperience)
     : selectedInstaller
-      ? isInCart(effectiveWingetId, selectedVersion, selectedInstaller.architecture)
+      ? isInCart(effectiveWingetId, selectedVersion, selectedInstaller.architecture, selectedScope)
       : false;
 
   // Escape key handler

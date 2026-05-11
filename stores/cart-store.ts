@@ -28,7 +28,12 @@ interface CartActions {
   toggleCart: () => void;
   openCart: () => void;
   closeCart: () => void;
-  isInCart: (wingetId: string, version: string, architecture?: string) => boolean;
+  isInCart: (
+    wingetId: string,
+    version: string,
+    architecture?: string,
+    scopeOrExperience?: string
+  ) => boolean;
   getItemCount: () => number;
 }
 
@@ -36,10 +41,11 @@ type CartStore = CartState & CartActions;
 
 function generateCartItemId(item: NewCartItem): string {
   if ('appSource' in item && item.appSource === 'store') {
-    return `store-${item.wingetId}-${item.version}-${Date.now()}`;
+    const store = item as Omit<StoreCartItem, 'id' | 'addedAt'>;
+    return `store-${store.wingetId}-${store.version}-${store.installExperience}-${Date.now()}`;
   }
   const win32 = item as Omit<Win32CartItem, 'id' | 'addedAt'>;
-  return `${item.wingetId}-${item.version}-${win32.architecture || 'neutral'}-${Date.now()}`;
+  return `${win32.wingetId}-${win32.version}-${win32.architecture || 'neutral'}-${win32.installScope}-${Date.now()}`;
 }
 
 export const useCartStore = create<CartStore>()(
@@ -117,14 +123,19 @@ export const useCartStore = create<CartStore>()(
         set({ isOpen: false });
       },
 
-      isInCart: (wingetId, version, architecture) => {
+      isInCart: (wingetId, version, architecture, scopeOrExperience) => {
         return get().items.some((item) => {
           if (item.wingetId !== wingetId || item.version !== version) return false;
-          // Store items match on wingetId + version only (no architecture)
-          if (isStoreCartItem(item)) return true;
-          // Win32 items also check architecture
-          if (isWin32CartItem(item) && architecture) {
-            return item.architecture === architecture;
+          if (isStoreCartItem(item)) {
+            // Store items distinguish by installExperience (user vs system)
+            if (!scopeOrExperience) return true;
+            return item.installExperience === scopeOrExperience;
+          }
+          if (isWin32CartItem(item)) {
+            // Win32 items distinguish by architecture AND installScope
+            if (architecture && item.architecture !== architecture) return false;
+            if (scopeOrExperience && item.installScope !== scopeOrExperience) return false;
+            return true;
           }
           return true;
         });
