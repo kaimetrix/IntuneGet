@@ -108,6 +108,27 @@ jobs:
               packages = packages.slice(0, importLimit);
             }
 
+            // Load exclusion list (winget IDs that must never enter curated_apps).
+            // Maintained in public.curated_excluded_apps. Add a row there to ban
+            // a package permanently (e.g. SourceForge installers that 403 in CI).
+            const excludedIds = new Set();
+            {
+              const pageSize = 1000;
+              for (let from = 0; ; from += pageSize) {
+                const { data, error } = await supabase
+                  .from('curated_excluded_apps')
+                  .select('winget_id')
+                  .range(from, from + pageSize - 1);
+                if (error) {
+                  throw new Error(`Failed to load curated_excluded_apps: ${error.message}`);
+                }
+                if (!data || data.length === 0) break;
+                for (const row of data) excludedIds.add(row.winget_id);
+                if (data.length < pageSize) break;
+              }
+            }
+            console.log(`Loaded ${excludedIds.size} excluded winget IDs`);
+
             // ---------------------------------------------------------------
             // Locale detection for language variant grouping
             // Known locale codes (ISO 639-1 + common BCP 47 subtags)
@@ -210,17 +231,26 @@ jobs:
               };
             }).filter(app => app.winget_id); // Filter out any entries without ID
 
-            const variantCount = appsToUpsert.filter(a => a.is_locale_variant).length;
-            console.log(`Prepared ${appsToUpsert.length} apps for upsert (${variantCount} locale variants detected)`);
+            // Drop any packages on the exclusion list before upsert.
+            const preExcludeCount = appsToUpsert.length;
+            const filteredAppsToUpsert = appsToUpsert.filter(a => !excludedIds.has(a.winget_id));
+            const excludedFromImport = preExcludeCount - filteredAppsToUpsert.length;
+            if (excludedFromImport > 0) {
+              console.log(`Excluded ${excludedFromImport} packages via curated_excluded_apps`);
+            }
+
+            const variantCount = filteredAppsToUpsert.filter(a => a.is_locale_variant).length;
+            console.log(`Prepared ${filteredAppsToUpsert.length} apps for upsert (${variantCount} locale variants detected)`);
 
             // Upsert in batches to handle scale
             const batchSize = 500;
             let totalUpserted = 0;
             let errors = 0;
 
+            let purgedExisting = 0;
             try {
-              for (let i = 0; i < appsToUpsert.length; i += batchSize) {
-                const batch = appsToUpsert.slice(i, i + batchSize);
+              for (let i = 0; i < filteredAppsToUpsert.length; i += batchSize) {
+                const batch = filteredAppsToUpsert.slice(i, i + batchSize);
 
                 const { error } = await supabase
                   .from('curated_apps')
@@ -239,12 +269,35 @@ jobs:
 
                 // Progress logging every 10 batches
                 if ((i / batchSize) % 10 === 0) {
-                  console.log(`Progress: ${Math.min(i + batchSize, appsToUpsert.length)}/${appsToUpsert.length}`);
+                  console.log(`Progress: ${Math.min(i + batchSize, filteredAppsToUpsert.length)}/${filteredAppsToUpsert.length}`);
                 }
 
                 // Small delay between batches to avoid rate limiting
-                if (i + batchSize < appsToUpsert.length) {
+                if (i + batchSize < filteredAppsToUpsert.length) {
                   await new Promise(r => setTimeout(r, 100));
+                }
+              }
+
+              // Purge any curated_apps rows whose winget_id is now excluded.
+              // Done in chunks because Supabase .in() has a URL-length limit.
+              if (excludedIds.size > 0) {
+                const excludedArr = Array.from(excludedIds);
+                const purgeChunkSize = 200;
+                for (let i = 0; i < excludedArr.length; i += purgeChunkSize) {
+                  const chunk = excludedArr.slice(i, i + purgeChunkSize);
+                  const { error: purgeError, count } = await supabase
+                    .from('curated_apps')
+                    .delete({ count: 'exact' })
+                    .in('winget_id', chunk);
+                  if (purgeError) {
+                    console.error(`Purge chunk ${Math.floor(i / purgeChunkSize) + 1} failed:`, purgeError.message);
+                    errors++;
+                  } else {
+                    purgedExisting += count || 0;
+                  }
+                }
+                if (purgedExisting > 0) {
+                  console.log(`Purged ${purgedExisting} previously-existing rows that are now excluded`);
                 }
               }
 
@@ -269,6 +322,9 @@ jobs:
                   source: 'winget-pkgs-index',
                   total_packages: packages.length,
                   upserted: totalUpserted,
+                  excluded_from_import: excludedFromImport,
+                  purged_existing: purgedExisting,
+                  excluded_total: excludedIds.size,
                   batch_errors: errors
                 },
                 updated_at: new Date().toISOString()
@@ -277,6 +333,8 @@ jobs:
               console.log(`\nImport complete:`);
               console.log(`  - Total packages in index: ${packages.length}`);
               console.log(`  - Successfully upserted: ${totalUpserted}`);
+              console.log(`  - Excluded from import: ${excludedFromImport}`);
+              console.log(`  - Purged previously-existing rows: ${purgedExisting}`);
               console.log(`  - Locale variants detected: ${variantCount}`);
               console.log(`  - Batch errors: ${errors}`);
 
@@ -284,6 +342,9 @@ jobs:
               fs.writeFileSync('./import-stats.json', JSON.stringify({
                 total: packages.length,
                 upserted: totalUpserted,
+                excluded_from_import: excludedFromImport,
+                purged_existing: purgedExisting,
+                excluded_total: excludedIds.size,
                 locale_variants: variantCount,
                 errors: errors
               }));
@@ -318,6 +379,9 @@ jobs:
             TOTAL=$(jq -r '.total' import-stats.json)
             UPSERTED=$(jq -r '.upserted' import-stats.json)
             VARIANTS=$(jq -r '.locale_variants // 0' import-stats.json)
+            EXCLUDED_IMPORT=$(jq -r '.excluded_from_import // 0' import-stats.json)
+            PURGED=$(jq -r '.purged_existing // 0' import-stats.json)
+            EXCLUDED_TOTAL=$(jq -r '.excluded_total // 0' import-stats.json)
             ERRORS=$(jq -r '.errors' import-stats.json)
 
             echo "## Curated App List Build Summary" >> $GITHUB_STEP_SUMMARY
@@ -326,6 +390,8 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "- **Total packages in index:** $TOTAL" >> $GITHUB_STEP_SUMMARY
             echo "- **Successfully imported:** $UPSERTED" >> $GITHUB_STEP_SUMMARY
+            echo "- **Excluded from import:** $EXCLUDED_IMPORT (denylist size: $EXCLUDED_TOTAL)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Purged existing rows:** $PURGED" >> $GITHUB_STEP_SUMMARY
             echo "- **Locale variants detected:** $VARIANTS" >> $GITHUB_STEP_SUMMARY
             echo "- **Batch errors:** $ERRORS" >> $GITHUB_STEP_SUMMARY
             echo "- **Generated at:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
