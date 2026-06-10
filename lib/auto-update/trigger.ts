@@ -164,6 +164,10 @@ export class AutoUpdateTrigger {
         }
       }
 
+      // Backfill PSADT settings from the original deployment for policies
+      // created before psadtConfig was stored on deployment_config
+      await this.ensurePsadtConfig(policy);
+
       // Determine update type
       const updateType = classifyUpdateType(updateInfo.currentVersion, updateInfo.latestVersion);
 
@@ -367,6 +371,72 @@ export class AutoUpdateTrigger {
   }
 
   /**
+   * Ensure deployment_config carries the PSADT settings from the original
+   * deployment. Policies created before psadtConfig was persisted lack it;
+   * read it from the most recent packaging job for this app and store it
+   * back on the policy so per-package settings (deploy mode, command
+   * overrides, verifyInstall, removeExistingInstall, registryMarkerPath)
+   * survive updates. Mutates policy.deployment_config in place; failures
+   * are non-fatal (the update proceeds without PSADT settings, as before).
+   */
+  private async ensurePsadtConfig(policy: AppUpdatePolicy): Promise<void> {
+    const config = policy.deployment_config as DeploymentConfig | null;
+    if (!config || config.psadtConfig) {
+      return;
+    }
+
+    try {
+      const { data: uploadHistory } = await this.supabase
+        .from('upload_history')
+        .select('packaging_job_id')
+        .eq('user_id', policy.user_id)
+        .eq('intune_tenant_id', policy.tenant_id)
+        .eq('winget_id', policy.winget_id)
+        .not('packaging_job_id', 'is', null)
+        .order('deployed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!uploadHistory?.packaging_job_id) {
+        return;
+      }
+
+      const { data: packagingJob } = await this.supabase
+        .from('packaging_jobs')
+        .select('package_config')
+        .eq('id', uploadHistory.packaging_job_id)
+        .maybeSingle();
+
+      const packageConfig = packagingJob?.package_config;
+      if (
+        !packageConfig ||
+        typeof packageConfig !== 'object' ||
+        Array.isArray(packageConfig)
+      ) {
+        return;
+      }
+
+      const psadtConfig = (packageConfig as Record<string, unknown>).psadtConfig;
+      if (!psadtConfig || typeof psadtConfig !== 'object' || Array.isArray(psadtConfig)) {
+        return;
+      }
+
+      config.psadtConfig = psadtConfig as DeploymentConfig['psadtConfig'];
+
+      await this.supabase
+        .from('app_update_policies')
+        .update({ deployment_config: policy.deployment_config })
+        .eq('id', policy.id);
+    } catch (error) {
+      console.warn(
+        `Could not backfill psadtConfig for policy ${policy.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  /**
    * Create a packaging job for the update
    */
   private async createPackagingJob(
@@ -416,6 +486,11 @@ export class AutoUpdateTrigger {
         categories,
         assignedGroups: config.assignedGroups,
         requirementRules: config.requirementRules,
+        // PSADT settings and nested installer info are read from
+        // package_config by the local packager (job-processor.ts)
+        psadtConfig: config.psadtConfig,
+        nestedInstallerType: updateInfo.nestedInstallerType,
+        nestedInstallerPath: updateInfo.nestedInstallerPath,
         forceCreate: config.forceCreateNewApp !== false,
         sourceIntuneAppId,
         assignmentMigration: {

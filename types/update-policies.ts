@@ -5,6 +5,7 @@
 
 import type { Json } from './database';
 import type { DetectionRule, RequirementRule } from './intune';
+import type { PSADTConfig } from './psadt';
 import type { IntuneAppCategorySelection, PackageAssignment } from './upload';
 
 // Policy type options
@@ -57,6 +58,11 @@ export interface DeploymentConfig {
     carryOverAssignments: boolean;
     removeAssignmentsFromPreviousApp: boolean;
   };
+
+  // PSADT settings from the original deployment (deploy mode, command
+  // overrides, verifyInstall, removeExistingInstall, registryMarkerPath, ...)
+  // so updates behave like the deployment that created the app
+  psadtConfig?: PSADTConfig;
 
   // Additional metadata
   description?: string;

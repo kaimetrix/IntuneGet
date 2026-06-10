@@ -211,6 +211,17 @@ function parseDetectionRules(value: unknown): DetectionRule[] {
   return Array.isArray(value) ? (value as DetectionRule[]) : [];
 }
 
+function parsePsadtConfig(packageConfig: unknown): DeploymentConfig['psadtConfig'] {
+  if (!isObject(packageConfig)) {
+    return undefined;
+  }
+  const psadtConfig = packageConfig.psadtConfig;
+  if (!isObject(psadtConfig)) {
+    return undefined;
+  }
+  return psadtConfig as unknown as DeploymentConfig['psadtConfig'];
+}
+
 /**
  * POST /api/updates/trigger
  * Manually trigger update deployment for one or more apps
@@ -386,6 +397,7 @@ export async function POST(request: NextRequest) {
               assignments: parsedAssignments,
               categories: parsedCategories,
               requirementRules: parsedRequirementRules,
+              psadtConfig: parsePsadtConfig(packageConfig),
               forceCreateNewApp: true,
               assignmentMigration,
             };
@@ -551,6 +563,11 @@ export async function POST(request: NextRequest) {
               callbackUrl,
               detectionRules: deploymentConfig.detectionRules
                 ? JSON.stringify(deploymentConfig.detectionRules)
+                : undefined,
+              // PSADT settings from the original deployment; triggerAutoUpdate
+              // backfills them onto the policy for pre-existing policies
+              psadtConfig: deploymentConfig.psadtConfig
+                ? JSON.stringify(deploymentConfig.psadtConfig)
                 : undefined,
               assignments: deploymentConfig.assignments
                 ? JSON.stringify(deploymentConfig.assignments)
