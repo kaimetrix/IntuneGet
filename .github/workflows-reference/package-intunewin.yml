@@ -926,7 +926,7 @@ jobs:
 
           # Parse PSADT config for restart behavior and deploy mode
           $restartBehavior = "suppress"  # Default
-          $deployModeFlag = ""  # Default: no flag (backward compat)
+          $deployModeFlag = " -DeployMode Silent"  # Default: Silent so PSADT v4 does not fall back to Auto mode and show UI
           if ($env:PSADT_CONFIG -and $env:PSADT_CONFIG -ne '{}') {
             try {
               $psadtConfig = $env:PSADT_CONFIG | ConvertFrom-Json -AsHashtable
@@ -946,7 +946,7 @@ jobs:
                   'Silent' { ' -DeployMode Silent' }
                   'NonInteractive' { ' -DeployMode NonInteractive' }
                   'Auto' { '' }
-                  default { '' }
+                  default { ' -DeployMode Silent' }
                 }
                 if ($deployModeFlag) {
                   Write-Host "Deploy mode flag: $($deployModeFlag.Trim())"

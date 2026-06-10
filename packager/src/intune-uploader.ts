@@ -204,19 +204,20 @@ export class IntuneUploader {
 
   /**
    * Build install/uninstall command lines based on deploy mode from psadtConfig.
-   * When deployMode is absent (backward compat), no flag is added.
+   * When deployMode is absent, defaults to Silent so PSADT v4 does not fall back
+   * to Auto mode and show UI to logged-in users. Explicit 'Auto' adds no flag.
    */
   private buildCommandLines(job: PackagingJob): { install: string; uninstall: string } {
     const packageConfig = this.asRecord(job.package_config);
-    let deployModeFlag = '';
+    let deployModeFlag = ' -DeployMode Silent';
 
     if (packageConfig) {
       const psadtConfig = this.asRecord(packageConfig.psadtConfig);
       const deployMode = psadtConfig?.deployMode;
-      if (deployMode === 'Silent') {
-        deployModeFlag = ' -DeployMode Silent';
-      } else if (deployMode === 'NonInteractive') {
+      if (deployMode === 'NonInteractive') {
         deployModeFlag = ' -DeployMode NonInteractive';
+      } else if (deployMode === 'Auto') {
+        deployModeFlag = '';
       }
     }
 
