@@ -982,7 +982,8 @@ jobs:
           $mappedAllowedArchitecture = $null
 
           switch ($inputArchitecture) {
-            'x86' { $mappedApplicableArchitecture = 'x86' }
+            # x86 binaries run on x64 Windows; restricting to x86 blocks the common case
+            'x86' { $mappedApplicableArchitecture = 'x86,x64' }
             'x64' { $mappedApplicableArchitecture = 'x64' }
             'arm64' {
               # Use modern field for ARM64 targeting; Graph sets applicableArchitectures to none.

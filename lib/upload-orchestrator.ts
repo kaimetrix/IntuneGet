@@ -245,10 +245,11 @@ export function cartItemToStagedPackage(
 
 // Helper functions
 
-function mapArchitecture(arch: string): 'x64' | 'x86' | 'arm64' | 'arm' | 'neutral' {
-  const mapping: Record<string, 'x64' | 'x86' | 'arm64' | 'arm' | 'neutral'> = {
+function mapArchitecture(arch: string): 'x64' | 'x86,x64' | 'arm64' | 'arm' | 'neutral' {
+  const mapping: Record<string, 'x64' | 'x86,x64' | 'arm64' | 'arm' | 'neutral'> = {
     x64: 'x64',
-    x86: 'x86',
+    // x86 binaries run on x64 Windows; restricting to x86 blocks the common case
+    x86: 'x86,x64',
     arm64: 'arm64',
     arm: 'arm',
     neutral: 'neutral',

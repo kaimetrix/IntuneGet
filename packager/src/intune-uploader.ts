@@ -1062,7 +1062,8 @@ export class IntuneUploader {
   private mapArchitecture(arch: string): string {
     const archMap: Record<string, string> = {
       x64: 'x64',
-      x86: 'x86',
+      // x86 binaries run on x64 Windows; restricting to x86 blocks the common case
+      x86: 'x86,x64',
       arm64: 'arm64',
       arm: 'arm',
     };
