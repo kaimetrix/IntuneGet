@@ -35,7 +35,7 @@ const STAGE_LABELS = [
 // ---------------------------------------------------------------------------
 
 const APP_POOL: AppDefinition[] = [
-  { name: "Google Chrome", icon: "/icons/Google.Chrome/icon-64-0.png", alt: "Google Chrome deployment" },
+  { name: "Google Chrome", icon: "/icons/Google.Chrome/icon-64.png", alt: "Google Chrome deployment" },
   { name: "Microsoft Teams", icon: "/icons/Microsoft.Teams/icon-64.png", alt: "Microsoft Teams deployment" },
   { name: "Slack", icon: "/icons/SlackTechnologies.Slack/icon-64.png", alt: "Slack deployment" },
   { name: "Firefox", icon: "/icons/Mozilla.Firefox/icon-64.png", alt: "Firefox deployment" },
