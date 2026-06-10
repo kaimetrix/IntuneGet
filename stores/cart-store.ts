@@ -265,6 +265,8 @@ export function createCartItem(
     architecture: installer.architecture,
     installScope,
     installerType: installer.type,
+    nestedInstallerType: installer.nestedInstallerType,
+    nestedInstallerPath: installer.nestedInstallerPath,
     installerUrl: installer.url,
     installerSha256: installer.sha256,
     installCommand: generateInstallCommand(installer, installScope),

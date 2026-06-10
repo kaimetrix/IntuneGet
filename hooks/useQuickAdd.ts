@@ -89,6 +89,8 @@ export function useQuickAdd(
             architecture: installer.architecture,
             installScope: installer.scope || 'machine',
             installerType: installer.type,
+            nestedInstallerType: installer.nestedInstallerType,
+            nestedInstallerPath: installer.nestedInstallerPath,
             installerUrl: installer.url,
             installerSha256: installer.sha256,
             installCommand: generateInstallCommand(installer, installer.scope || 'machine'),

@@ -33,6 +33,8 @@ export interface WingetInstaller {
   InstallerUrl: string;
   InstallerSha256: string;
   InstallerType: WingetInstallerType;
+  NestedInstallerType?: WingetInstallerType;
+  NestedInstallerFiles?: Array<{ RelativeFilePath: string; PortableCommandAlias?: string }>;
   Scope?: WingetScope;
   InstallerSwitches?: WingetInstallerSwitches;
   ProductCode?: string;
@@ -165,6 +167,8 @@ export interface NormalizedInstaller {
   url: string;
   sha256: string;
   type: WingetInstallerType;
+  nestedInstallerType?: WingetInstallerType;
+  nestedInstallerPath?: string;
   scope?: WingetScope;
   silentArgs?: string;
   productCode?: string;

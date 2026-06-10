@@ -356,6 +356,8 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
         architecture: recommendedInstaller.architecture,
         installScope: recommendedInstaller.scope || 'machine',
         installerType: recommendedInstaller.type,
+        nestedInstallerType: recommendedInstaller.nestedInstallerType,
+        nestedInstallerPath: recommendedInstaller.nestedInstallerPath,
         installerUrl: recommendedInstaller.url,
         installerSha256: recommendedInstaller.sha256,
         installCommand: generateInstallCommand(
@@ -459,6 +461,8 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
         architecture: recommendedInstaller.architecture,
         installScope: recommendedInstaller.scope || 'machine',
         installerType: recommendedInstaller.type,
+        nestedInstallerType: recommendedInstaller.nestedInstallerType,
+        nestedInstallerPath: recommendedInstaller.nestedInstallerPath,
         installerUrl: recommendedInstaller.url,
         installerSha256: recommendedInstaller.sha256,
         installCommand: generateInstallCommand(

@@ -18,6 +18,8 @@ export interface WorkflowInputs {
   installerUrl: string;
   installerSha256: string;
   installerType: string;
+  nestedInstallerType?: string; // Nested installer type for zip installers
+  nestedInstallerPath?: string; // Relative path to the nested installer inside the zip
   silentSwitches: string;
   uninstallCommand: string;
   callbackUrl: string;
@@ -141,6 +143,8 @@ export async function triggerPackagingWorkflow(
           url: finalInstallerUrl,
           sha256: inputs.installerSha256,
           type: inputs.installerType,
+          nestedInstallerType: inputs.nestedInstallerType || '',
+          nestedInstallerPath: inputs.nestedInstallerPath || '',
           silentSwitches: inputs.silentSwitches,
           uninstallCommand: inputs.uninstallCommand,
         },

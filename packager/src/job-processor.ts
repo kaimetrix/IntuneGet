@@ -259,6 +259,7 @@ export class JobProcessor {
       nullsoft: '.exe',
       wix: '.msi',
       burn: '.exe',
+      zip: '.zip',
     };
     return extensions[installerType] || '.exe';
   }
@@ -405,7 +406,7 @@ function Install-ADTDeployment
 ${this.getPreInstallRemovalBlock(job, appName)}
     ## Install the application
     ${this.getInstallCommand(job, installerFileName, silentSwitches)}
-
+${this.getPostInstallVerificationBlock(job, appName)}
     ## Create IntuneGet detection marker for Intune detection rules
     ${this.getRegistryMarkerCreation(job)}
 }
@@ -494,6 +495,25 @@ catch
   }
 
   /**
+   * Get the nested installer metadata from package_config
+   * These fields live top-level on the cart item (not inside psadtConfig)
+   * Returns null entries when absent, not a string, or empty/whitespace
+   */
+  private getNestedInstaller(job: PackagingJob): { type: string | null; path: string | null } {
+    const packageConfig = job.package_config;
+    if (typeof packageConfig !== 'object' || packageConfig === null) {
+      return { type: null, path: null };
+    }
+    const config = packageConfig as Record<string, unknown>;
+    const readString = (value: unknown): string | null =>
+      typeof value === 'string' && value.trim() ? value.trim() : null;
+    return {
+      type: readString(config.nestedInstallerType),
+      path: readString(config.nestedInstallerPath),
+    };
+  }
+
+  /**
    * Get custom install/uninstall command override from package_config.psadtConfig
    * Returns null when the override is absent, not a string, or empty/whitespace
    */
@@ -534,6 +554,27 @@ catch
   }
 
   /**
+   * Generate PowerShell code to verify the application appears in Add/Remove
+   * Programs after install, failing the deployment before the detection
+   * marker is written when it does not
+   * Opt-in via package_config.psadtConfig.verifyInstall; returns '' when disabled
+   */
+  private getPostInstallVerificationBlock(job: PackagingJob, escapedAppName: string): string {
+    const psadtConfig = this.getPsadtConfig(job);
+    if (psadtConfig?.verifyInstall !== true) {
+      return '';
+    }
+    return `
+    ## Verify the application actually installed before writing the detection marker
+    $verifyApps = Get-ADTApplication -Name '${escapedAppName}' -NameMatch 'Contains' -ErrorAction SilentlyContinue
+    if (-not $verifyApps) {
+        throw "Post-install verification failed: '${escapedAppName}' was not found in the installed applications list. The installer exited without error but the application does not appear to be installed."
+    }
+    Write-ADTLogEntry -Message "Post-install verification passed" -Source 'Install-ADTDeployment'
+`;
+  }
+
+  /**
    * Get install command based on installer type (PSADT v4 cmdlets)
    * A custom install command override from psadtConfig takes precedence
    */
@@ -547,13 +588,14 @@ catch
     const installerType = job.installer_type;
     const ext = path.extname(fileName).toLowerCase();
 
+    // Zip archives carry a nested installer - never execute the .zip itself
+    // (a zip-declared installer that is actually an .exe or .msi still runs natively)
+    if (ext === '.zip' || (installerType === 'zip' && ext !== '.exe' && ext !== '.msi')) {
+      return this.getZipInstallCommand(job, fileName, silentSwitches);
+    }
+
     if (ext === '.msi' || installerType === 'msi' || installerType === 'wix') {
-      // Strip msiexec action and quiet flags - Start-ADTMsiProcess supplies those itself
-      const msiProperties = silentSwitches
-        .split(/\s+/)
-        .filter((token) => token && !/^\/(q[nbrfu]?|quiet|norestart|i|x)$/i.test(token))
-        .join(' ')
-        .trim();
+      const msiProperties = this.extractMsiProperties(silentSwitches);
       if (msiProperties) {
         return `Start-ADTMsiProcess -Action 'Install' -FilePath '${fileName}' -AdditionalArgumentList '${msiProperties}'`;
       }
@@ -561,6 +603,63 @@ catch
     }
 
     return `Start-ADTProcess -FilePath "$($adtSession.DirFiles)\\${fileName}" -ArgumentList '${silentSwitches}' -WindowStyle Hidden -WaitForMsiExec`;
+  }
+
+  /**
+   * Strip msiexec action and quiet flags from silent switches -
+   * Start-ADTMsiProcess supplies those itself
+   */
+  private extractMsiProperties(silentSwitches: string): string {
+    return silentSwitches
+      .split(/\s+/)
+      .filter((token) => token && !/^\/(q[nbrfu]?|quiet|norestart|i|x)$/i.test(token))
+      .join(' ')
+      .trim();
+  }
+
+  /**
+   * Get install command for zip installers (PSADT v4 cmdlets)
+   * Extracts the archive to a unique temp directory and runs the nested
+   * installer declared by package_config.nestedInstallerType/nestedInstallerPath
+   * Emits an install-time error when no nested installer is declared
+   */
+  private getZipInstallCommand(job: PackagingJob, fileName: string, silentSwitches: string): string {
+    const nested = this.getNestedInstaller(job);
+    if (!nested.path) {
+      return 'throw "Zip package does not declare a nested installer; cannot install"';
+    }
+
+    const nestedPathEscaped = nested.path.replace(/'/g, "''");
+    const nestedType = (nested.type ?? '').toLowerCase();
+
+    let executeLine: string;
+    if (nestedType === 'msi' || nestedType === 'wix') {
+      const msiProperties = this.extractMsiProperties(silentSwitches);
+      executeLine = msiProperties
+        ? `Start-ADTMsiProcess -Action 'Install' -FilePath $nestedInstallerPath -AdditionalArgumentList '${msiProperties}'`
+        : `Start-ADTMsiProcess -Action 'Install' -FilePath $nestedInstallerPath`;
+    } else if (nestedType === 'portable') {
+      executeLine = 'throw "Portable nested installers are not supported yet"';
+    } else {
+      executeLine = `Start-ADTProcess -FilePath $nestedInstallerPath -ArgumentList '${silentSwitches}' -WindowStyle Hidden -WaitForMsiExec`;
+    }
+
+    return `$zipExtractDir = [System.IO.Path]::Combine($env:TEMP, "IntuneGet_Zip_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 8))
+    $null = New-Item -Path $zipExtractDir -ItemType Directory -Force
+    try {
+        Expand-Archive -Path "$($adtSession.DirFiles)\\${fileName}" -DestinationPath $zipExtractDir -Force
+        $nestedInstallerPath = Join-Path $zipExtractDir '${nestedPathEscaped}'
+        if (-not (Test-Path -LiteralPath $nestedInstallerPath)) {
+            throw "Nested installer not found in archive: ${nestedPathEscaped}"
+        }
+        Write-ADTLogEntry -Message "Running nested installer: $nestedInstallerPath" -Severity 'Info' -Source 'Install-ADTDeployment'
+        ${executeLine}
+    }
+    finally {
+        if (Test-Path -LiteralPath $zipExtractDir) {
+            Remove-Item -Path $zipExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }`;
   }
 
   /**

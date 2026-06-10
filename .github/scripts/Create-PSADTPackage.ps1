@@ -29,6 +29,8 @@ $Publisher = $env:INPUT_PUBLISHER
 $Version = $env:INPUT_VERSION
 $WingetId = $env:INPUT_WINGET_ID
 $InstallerType = $env:INPUT_INSTALLER_TYPE
+$NestedInstallerType = $env:INPUT_NESTED_INSTALLER_TYPE
+$NestedInstallerPath = $env:INPUT_NESTED_INSTALLER_PATH
 $InstallScope = if ($env:INPUT_INSTALL_SCOPE) { $env:INPUT_INSTALL_SCOPE } else { 'machine' }
 $IsUserScope = $InstallScope -eq 'user'
 
@@ -273,6 +275,8 @@ $displayNameEscaped = $DisplayName -replace "'", "''" -replace '`', '``' -replac
 $publisherEscaped = $Publisher -replace "'", "''" -replace '`', '``' -replace '\$', '`$'
 $sanitizedWingetId = $WingetId -replace '[\.\-]', '_'
 $installerFileName = $env:INSTALLER_FILENAME
+# Escaped variant for embedding in single-quoted strings in the generated script
+$installerFileNameSingleQuoteEscaped = $installerFileName -replace "'", "''"
 $installerTypeLower = $InstallerType.ToLower()
 $psadtVersion = '4.1.8'
 
@@ -300,6 +304,8 @@ if ([string]::IsNullOrWhiteSpace($registryMarkerPath)) { $registryMarkerPath = '
 $registryMarkerPathEscaped = $registryMarkerPath -replace "'", "''"
 # Optional pre-install removal of any existing installation (opt-in via PSADT config)
 $removeExistingInstall = if ($psadtConfig.removeExistingInstall) { $true } else { $false }
+# Optional post-install verification against Add/Remove Programs (opt-in via PSADT config)
+$verifyInstall = if ($psadtConfig.verifyInstall) { $true } else { $false }
 # Only escape single quotes - the app name is embedded in a single-quoted string in the generated script
 $displayNameSingleQuoteEscaped = $DisplayName -replace "'", "''"
 $brandingCompanyName = $psadtConfig.brandingCompanyName
@@ -827,7 +833,7 @@ $lines = @(
 $lines += @(
     ''
     '    # Verify installer file exists before proceeding'
-    "    `$installerPath = Join-Path `$adtSession.DirFiles '$installerFileName'"
+    "    `$installerPath = Join-Path `$adtSession.DirFiles '$installerFileNameSingleQuoteEscaped'"
     '    if (-not (Test-Path -LiteralPath $installerPath)) {'
     '        Write-ADTLogEntry -Message "Installer file not found: $installerPath" -Severity ''Error'' -Source ''Install-ADTDeployment'''
     '        throw "Installer file not found: $installerPath"'
@@ -892,7 +898,79 @@ if (-not [string]::IsNullOrWhiteSpace($customInstallCommand)) {
                 '    }'
             )
         }
-        { $_ -in 'zip', 'portable' } {
+        'zip' {
+            # Zip archives carry a nested installer (winget nestedInstallerType/nestedInstallerPath)
+            # Never execute the .zip itself - extract it and run the declared nested installer
+            if ([string]::IsNullOrWhiteSpace($NestedInstallerPath)) {
+                Write-Host "Zip installer without nested installer path - emitting install-time error"
+                $lines += @(
+                    '    # Zip archives cannot be executed directly and no nested installer was declared'
+                    '    throw "Zip package does not declare a nested installer; cannot install"'
+                )
+            } else {
+                $nestedInstallerPathEscaped = $NestedInstallerPath -replace "'", "''"
+                $nestedInstallerTypeLower = if ($NestedInstallerType) { $NestedInstallerType.ToLower() } else { '' }
+                Write-Host "Zip installer with nested installer: type='$nestedInstallerTypeLower' path='$NestedInstallerPath'"
+
+                # Build the execution line for the nested installer (dispatch on nested type)
+                switch ($nestedInstallerTypeLower) {
+                    { $_ -in 'msi', 'wix' } {
+                        $msiProperties = ($silentSwitchesEscaped -replace '/q[nbrfu]?\s*', '' -replace '/quiet\s*', '').Trim()
+                        if ($msiProperties) {
+                            $nestedExecuteLine = "        Start-ADTMsiProcess -Action 'Install' -FilePath `$nestedInstallerPath -AdditionalArgumentList '$msiProperties'"
+                        } else {
+                            $nestedExecuteLine = "        Start-ADTMsiProcess -Action 'Install' -FilePath `$nestedInstallerPath"
+                        }
+                    }
+                    'portable' {
+                        $nestedExecuteLine = '        throw "Portable nested installers are not supported yet"'
+                    }
+                    default {
+                        if ($IsUserScope) {
+                            $nestedExecuteLine = "        Start-ADTProcess -FilePath `$nestedInstallerPath -ArgumentList '$silentSwitchesEscaped' -UseShellExecute -WaitForMsiExec -Timeout (New-TimeSpan -Minutes 30) -TimeoutAction Stop"
+                        } else {
+                            $nestedExecuteLine = "        Start-ADTProcess -FilePath `$nestedInstallerPath -ArgumentList '$silentSwitchesEscaped' -WindowStyle Hidden -WaitForMsiExec -Timeout (New-TimeSpan -Minutes 30) -TimeoutAction Stop"
+                        }
+                    }
+                }
+
+                $lines += @(
+                    ''
+                    '    # Extract the zip archive to a unique temp directory and run the nested installer'
+                    '    $zipExtractDir = [System.IO.Path]::Combine($env:TEMP, "IntuneGet_Zip_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 8))'
+                    '    $null = New-Item -Path $zipExtractDir -ItemType Directory -Force'
+                    '    try {'
+                    '        Write-ADTLogEntry -Message "Extracting zip archive to: $zipExtractDir" -Severity ''Info'' -Source ''Install-ADTDeployment'''
+                )
+                if ($IsUserScope) {
+                    # Per-user installs: copy the zip to user temp first (consistent with the
+                    # exe branch - some installers fail when run from the IMECache directory)
+                    $lines += @(
+                        "        Copy-Item -LiteralPath `"`$(`$adtSession.DirFiles)\$installerFileName`" -Destination `$zipExtractDir -Force"
+                        "        Expand-Archive -Path (Join-Path `$zipExtractDir '$installerFileNameSingleQuoteEscaped') -DestinationPath `$zipExtractDir -Force"
+                    )
+                } else {
+                    $lines += @(
+                        "        Expand-Archive -Path `"`$(`$adtSession.DirFiles)\$installerFileName`" -DestinationPath `$zipExtractDir -Force"
+                    )
+                }
+                $lines += @(
+                    "        `$nestedInstallerPath = Join-Path `$zipExtractDir '$nestedInstallerPathEscaped'"
+                    '        if (-not (Test-Path -LiteralPath $nestedInstallerPath)) {'
+                    "            throw `"Nested installer not found in archive: $nestedInstallerPathEscaped`""
+                    '        }'
+                    '        Write-ADTLogEntry -Message "Running nested installer: $nestedInstallerPath" -Severity ''Info'' -Source ''Install-ADTDeployment'''
+                    $nestedExecuteLine
+                    '    }'
+                    '    finally {'
+                    '        if (Test-Path -LiteralPath $zipExtractDir) {'
+                    '            Remove-Item -Path $zipExtractDir -Recurse -Force -ErrorAction SilentlyContinue'
+                    '        }'
+                    '    }'
+                )
+            }
+        }
+        'portable' {
             $lines += @(
                 "    `$zipPath = `"`$(`$adtSession.DirFiles)\$installerFileName`""
                 "    `$extractPath = `"`$env:ProgramFiles\$displayNameEscaped`""
@@ -956,6 +1034,22 @@ $lines += @(
     '    # Close installation progress dialog'
     '    Close-ADTInstallationProgress'
 )
+
+# Optional post-install verification (opt-in via PSADT config)
+# Throwing here routes through the standard catch -> Close-ADTSession error exit,
+# and the detection marker write below is skipped because it never runs
+if ($verifyInstall) {
+    Write-Host "Post-install verification enabled"
+    $lines += @(
+        ''
+        '    ## Verify the application actually installed before writing the detection marker'
+        "    `$verifyApps = Get-ADTApplication -Name '$displayNameSingleQuoteEscaped' -NameMatch 'Contains' -ErrorAction SilentlyContinue"
+        '    if (-not $verifyApps) {'
+        "        throw `"Post-install verification failed: '$displayNameSingleQuoteEscaped' was not found in the installed applications list. The installer exited without error but the application does not appear to be installed.`""
+        '    }'
+        "    Write-ADTLogEntry -Message `"Post-install verification passed`" -Source 'Install-ADTDeployment'"
+    )
+}
 
 # Write registry marker - scope-aware
 if ($IsUserScope) {

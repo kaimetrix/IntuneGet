@@ -32,6 +32,8 @@ interface UpdateInfo {
   installerUrl: string;
   installerSha256: string;
   installerType: string;
+  nestedInstallerType?: string;
+  nestedInstallerPath?: string;
   currentIntuneAppId?: string;
 }
 
@@ -616,6 +618,8 @@ export async function getLatestInstallerInfo(
   let installerUrl = versionInfo.installer_url;
   let installerSha256 = versionInfo.installer_sha256;
   let installerType = versionInfo.installer_type;
+  let nestedInstallerType: string | undefined;
+  let nestedInstallerPath: string | undefined;
 
   // If there are architecture-specific installers, prefer x64
   // Note: The installers JSONB uses PascalCase from winget manifests
@@ -627,6 +631,10 @@ export async function getLatestInstallerInfo(
       installerUrl = x64Installer.InstallerUrl || installerUrl;
       installerSha256 = x64Installer.InstallerSha256 || installerSha256;
       installerType = x64Installer.InstallerType || installerType;
+      nestedInstallerType = x64Installer.NestedInstallerType || undefined;
+      nestedInstallerPath = Array.isArray(x64Installer.NestedInstallerFiles)
+        ? x64Installer.NestedInstallerFiles[0]?.RelativeFilePath
+        : undefined;
     }
   }
 
@@ -642,5 +650,7 @@ export async function getLatestInstallerInfo(
     installerUrl,
     installerSha256: installerSha256 || '',
     installerType: installerType || 'exe',
+    nestedInstallerType,
+    nestedInstallerPath,
   };
 }

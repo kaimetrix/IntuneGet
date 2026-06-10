@@ -332,6 +332,14 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                     onChange={(checked) => updateConfig({ removeExistingInstall: checked })}
                   />
 
+                  {/* Verify Install Toggle */}
+                  <ToggleOption
+                    label="Verify installation before marking as installed"
+                    description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
+                    checked={config.verifyInstall || false}
+                    onChange={(checked) => updateConfig({ verifyInstall: checked })}
+                  />
+
                   {/* Detection Marker Registry Path */}
                   <div>
                     <label className="block text-sm font-medium text-text-secondary mb-1.5">

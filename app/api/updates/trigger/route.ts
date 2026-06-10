@@ -541,6 +541,8 @@ export async function POST(request: NextRequest) {
               installerUrl: installerInfo.installerUrl,
               installerSha256: installerInfo.installerSha256 || '',
               installerType: installerInfo.installerType || deploymentConfig.installerType || 'exe',
+              nestedInstallerType: installerInfo.nestedInstallerType,
+              nestedInstallerPath: installerInfo.nestedInstallerPath,
               silentSwitches: extractSilentSwitches(
                 deploymentConfig.installCommand || '',
                 installerInfo.installerType || deploymentConfig.installerType || 'exe'

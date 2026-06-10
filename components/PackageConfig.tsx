@@ -331,6 +331,8 @@ export function PackageConfig({ package: pkg, installers, onClose, isDeployed = 
           installerType: selectedInstaller!.type,
           installerUrl: selectedInstaller!.url,
           installerSha256: selectedInstaller!.sha256,
+          nestedInstallerType: selectedInstaller!.nestedInstallerType,
+          nestedInstallerPath: selectedInstaller!.nestedInstallerPath,
           installCommand: config.installCommand || generateInstallCommand(selectedInstaller!, selectedScope),
           uninstallCommand: config.uninstallCommand || generateUninstallCommand(selectedInstaller!, pkg.name),
           detectionRules: config.detectionRules,
@@ -800,6 +802,14 @@ export function PackageConfig({ package: pkg, installers, onClose, isDeployed = 
                     description="Uninstalls any detected existing installation of this application before installing. Use when upgrades fail because a previous version is present."
                     checked={config.removeExistingInstall || false}
                     onChange={(checked) => updateConfig({ removeExistingInstall: checked })}
+                  />
+
+                  {/* Verify Install Toggle */}
+                  <ToggleOption
+                    label="Verify installation before marking as installed"
+                    description="After the installer finishes, checks Add/Remove Programs for the application and fails the deployment if it is not found. Prevents false success from installers that exit without installing."
+                    checked={config.verifyInstall || false}
+                    onChange={(checked) => updateConfig({ verifyInstall: checked })}
                   />
 
                   {/* Processes to Close */}

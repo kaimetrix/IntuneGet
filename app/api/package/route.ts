@@ -421,6 +421,8 @@ export async function POST(request: NextRequest) {
               installerUrl: item.installerUrl,
               installerSha256: item.installerSha256 || '',
               installerType: item.installerType,
+              nestedInstallerType: item.nestedInstallerType,
+              nestedInstallerPath: item.nestedInstallerPath,
               silentSwitches: extractSilentSwitches(item.installCommand, item.installerType),
               uninstallCommand: item.uninstallCommand,
               callbackUrl,

@@ -300,6 +300,106 @@ describe('normalizeInstaller', () => {
     });
   });
 
+  describe('nested installer handling (zip)', () => {
+    it('should map nested installer type and path for zip installers', () => {
+      // e.g. dotPDN.PaintDotNet ships a zip wrapping an exe installer
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/paint.net.5.1.12.install.x64.zip',
+        InstallerSha256: 'abc123',
+        InstallerType: 'zip',
+        NestedInstallerType: 'exe',
+        NestedInstallerFiles: [
+          { RelativeFilePath: 'paint.net.5.1.12.install.x64.exe' },
+        ],
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.type).toBe('zip');
+      expect(result.nestedInstallerType).toBe('exe');
+      expect(result.nestedInstallerPath).toBe('paint.net.5.1.12.install.x64.exe');
+      // Default silent switch comes from the NESTED type, not zip
+      expect(result.silentArgs).toBe('/S');
+    });
+
+    it('should pick the nested-type default switch for zip with nested inno', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/app.zip',
+        InstallerSha256: 'abc123',
+        InstallerType: 'zip',
+        NestedInstallerType: 'inno',
+        NestedInstallerFiles: [{ RelativeFilePath: 'setup.exe' }],
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART');
+    });
+
+    it('should prefer declared Silent switches over nested-type defaults', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/app.zip',
+        InstallerSha256: 'abc123',
+        InstallerType: 'zip',
+        NestedInstallerType: 'inno',
+        NestedInstallerFiles: [{ RelativeFilePath: 'setup.exe' }],
+        InstallerSwitches: {
+          Silent: '/CUSTOMSILENT',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/CUSTOMSILENT');
+    });
+
+    it('should leave nested fields undefined for non-zip installers', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.nestedInstallerType).toBeUndefined();
+      expect(result.nestedInstallerPath).toBeUndefined();
+      expect(result.silentArgs).toBe('/S');
+    });
+
+    it('should yield undefined nestedInstallerPath for zip without NestedInstallerFiles', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/app.zip',
+        InstallerSha256: 'abc123',
+        InstallerType: 'zip',
+        NestedInstallerType: 'exe',
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.nestedInstallerType).toBe('exe');
+      expect(result.nestedInstallerPath).toBeUndefined();
+    });
+
+    it('should keep the zip default (empty) when zip has no nested type', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/app.zip',
+        InstallerSha256: 'abc123',
+        InstallerType: 'zip',
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('');
+    });
+  });
+
   describe('architecture handling', () => {
     it('should handle x64 architecture', () => {
       const installer: WingetInstaller = {

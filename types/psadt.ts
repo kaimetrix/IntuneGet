@@ -165,6 +165,10 @@ export interface PSADTConfig {
   // Remove any detected existing installation before installing
   removeExistingInstall?: boolean;
 
+  // Verify the application appears in Add/Remove Programs after install
+  // and fail the deployment if it is not found (opt-in)
+  verifyInstall?: boolean;
+
   // Progress dialog (Show-ADTInstallationProgress)
   progressDialog: ProgressConfig;
 

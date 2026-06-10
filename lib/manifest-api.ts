@@ -335,6 +335,8 @@ function coerceInstallersArray(rawInstallers: unknown, defaultType?: string): Wi
     InstallerUrl: (inst.InstallerUrl as string) || '',
     InstallerSha256: (inst.InstallerSha256 as string) || '',
     InstallerType: normalizeInstallerType((inst.InstallerType as string) || defaultType),
+    NestedInstallerType: inst.NestedInstallerType as WingetInstaller['NestedInstallerType'],
+    NestedInstallerFiles: inst.NestedInstallerFiles as WingetInstaller['NestedInstallerFiles'],
     Scope: inst.Scope as WingetInstaller['Scope'],
     InstallerSwitches: inst.InstallerSwitches as WingetInstaller['InstallerSwitches'],
     ProductCode: inst.ProductCode as string,
@@ -440,6 +442,8 @@ function normalizeInstallers(manifest: Record<string, unknown>): WingetInstaller
 
   // Get top-level defaults
   const defaultType = manifest.InstallerType as string;
+  const defaultNestedType = manifest.NestedInstallerType as string;
+  const defaultNestedFiles = manifest.NestedInstallerFiles as WingetInstaller['NestedInstallerFiles'];
   const defaultScope = manifest.Scope as string;
   const defaultSwitches = manifest.InstallerSwitches as Record<string, string>;
   const defaultPlatform = manifest.Platform as string[];
@@ -453,6 +457,11 @@ function normalizeInstallers(manifest: Record<string, unknown>): WingetInstaller
     InstallerType: normalizeInstallerType(
       (installer.InstallerType as string) || defaultType
     ),
+    NestedInstallerType: ((installer.NestedInstallerType as string) || defaultNestedType)
+      ? normalizeInstallerType((installer.NestedInstallerType as string) || defaultNestedType)
+      : undefined,
+    NestedInstallerFiles: (installer.NestedInstallerFiles as WingetInstaller['NestedInstallerFiles']) ||
+                          defaultNestedFiles,
     Scope: (installer.Scope as WingetInstaller['Scope']) ||
            (defaultScope as WingetInstaller['Scope']),
     InstallerSwitches: (installer.InstallerSwitches as WingetInstaller['InstallerSwitches']) ||
@@ -542,12 +551,19 @@ function appendCustomSwitch(silentArgs: string, custom: string | undefined): str
 export function normalizeInstaller(installer: WingetInstaller): NormalizedInstaller {
   let silentArgs = '';
 
+  // For zip installers the silent switches apply to the nested installer,
+  // so derive the default from the nested type (e.g. nested inno gets /VERYSILENT)
+  const effectiveType =
+    installer.InstallerType === 'zip' && installer.NestedInstallerType
+      ? installer.NestedInstallerType
+      : installer.InstallerType;
+
   if (installer.InstallerSwitches?.Silent) {
     silentArgs = installer.InstallerSwitches.Silent;
   } else if (installer.InstallerSwitches?.SilentWithProgress) {
     silentArgs = installer.InstallerSwitches.SilentWithProgress;
   } else {
-    silentArgs = getDefaultSilentSwitch(installer.InstallerType);
+    silentArgs = getDefaultSilentSwitch(effectiveType);
   }
 
   silentArgs = appendCustomSwitch(silentArgs, installer.InstallerSwitches?.Custom);
@@ -557,6 +573,8 @@ export function normalizeInstaller(installer: WingetInstaller): NormalizedInstal
     url: installer.InstallerUrl,
     sha256: installer.InstallerSha256,
     type: installer.InstallerType,
+    nestedInstallerType: installer.NestedInstallerType,
+    nestedInstallerPath: installer.NestedInstallerFiles?.[0]?.RelativeFilePath,
     scope: installer.Scope,
     silentArgs,
     productCode: installer.ProductCode,

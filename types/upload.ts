@@ -163,6 +163,8 @@ export interface Win32CartItem extends CartItemBase {
   architecture: WingetArchitecture;
   installScope: WingetScope;
   installerType: WingetInstallerType;
+  nestedInstallerType?: WingetInstallerType;
+  nestedInstallerPath?: string;
   installerUrl: string;
   installerSha256: string;
   installCommand: string;

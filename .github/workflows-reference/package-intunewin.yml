@@ -27,6 +27,8 @@ jobs:
       INSTALLER_SHA256: ${{ github.event.client_payload.installer.sha256 }}
       HASH_VALIDATION_MODE: ${{ github.event.client_payload.installer.hashValidationMode }}
       INSTALLER_TYPE: ${{ github.event.client_payload.installer.type }}
+      NESTED_INSTALLER_TYPE: ${{ github.event.client_payload.installer.nestedInstallerType }}
+      NESTED_INSTALLER_PATH: ${{ github.event.client_payload.installer.nestedInstallerPath }}
       SILENT_SWITCHES: ${{ github.event.client_payload.installer.silentSwitches }}
       UNINSTALL_COMMAND: ${{ github.event.client_payload.installer.uninstallCommand }}
       PSADT_CONFIG: ${{ github.event.client_payload.config.psadtConfig }}
@@ -763,6 +765,8 @@ jobs:
           INPUT_VERSION: ${{ github.event.client_payload.app.version }}
           INPUT_WINGET_ID: ${{ github.event.client_payload.app.wingetId }}
           INPUT_INSTALLER_TYPE: ${{ github.event.client_payload.installer.type }}
+          INPUT_NESTED_INSTALLER_TYPE: ${{ github.event.client_payload.installer.nestedInstallerType }}
+          INPUT_NESTED_INSTALLER_PATH: ${{ github.event.client_payload.installer.nestedInstallerPath }}
           INPUT_INSTALL_SCOPE: ${{ github.event.client_payload.config.installScope }}
           INPUT_ARCHITECTURE: ${{ github.event.client_payload.app.architecture }}
         run: |
