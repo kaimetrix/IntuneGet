@@ -103,6 +103,110 @@ describe('normalizeInstaller', () => {
     expect(result.packageFamilyName).toBe('Microsoft.App_8wekyb3d8bbwe');
   });
 
+  describe('Custom switches handling', () => {
+    it('should append Custom to the default silent switch when only Custom is provided', () => {
+      // e.g. Greenshot declares only Custom: '/ALLUSERS' in its manifest
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/Greenshot-INSTALLER.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'inno',
+        InstallerSwitches: {
+          Custom: '/ALLUSERS',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /ALLUSERS');
+    });
+
+    it('should append Custom after Silent when both are provided', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        InstallerSwitches: {
+          Silent: '/VERYSILENT',
+          Custom: '/ALLUSERS',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/VERYSILENT /ALLUSERS');
+    });
+
+    it('should append Custom after SilentWithProgress when Silent is not available', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        InstallerSwitches: {
+          SilentWithProgress: '/S /passive',
+          Custom: '/ALLUSERS',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/S /passive /ALLUSERS');
+    });
+
+    it('should leave switches unchanged when Custom is not provided', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        InstallerSwitches: {
+          Silent: '/VERYSILENT /SUPPRESSMSGBOXES',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/VERYSILENT /SUPPRESSMSGBOXES');
+    });
+
+    it('should not duplicate Custom when it is already contained in the silent switch', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        InstallerSwitches: {
+          Silent: '/VERYSILENT /ALLUSERS',
+          Custom: '/ALLUSERS',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/VERYSILENT /ALLUSERS');
+    });
+
+    it('should append a Custom switch that is a substring of an existing switch', () => {
+      // Token-level dedupe: /S is not the same switch as /SILENT
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        InstallerSwitches: {
+          Silent: '/SILENT',
+          Custom: '/S',
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.silentArgs).toBe('/SILENT /S');
+    });
+  });
+
   describe('default silent arguments', () => {
     it('should use default args for MSI', () => {
       const installer: WingetInstaller = {

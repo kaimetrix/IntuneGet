@@ -512,6 +512,31 @@ function getDefaultSilentSwitch(installerType: WingetInstallerType): string {
 }
 
 /**
+ * Append manifest Custom switches to the silent switches.
+ * winget always appends Custom switches after the silent switches,
+ * so manifests that only declare Custom (e.g. Greenshot's '/ALLUSERS')
+ * must not lose them during normalization.
+ */
+function appendCustomSwitch(silentArgs: string, custom: string | undefined): string {
+  const customArgs = custom?.trim();
+
+  if (!customArgs) {
+    return silentArgs;
+  }
+
+  // Dedupe at token level: a plain substring check would treat /S as already
+  // present inside /SILENT and silently drop a legitimate custom switch
+  const existingTokens = new Set(silentArgs.split(/\s+/).filter(Boolean));
+  const newTokens = customArgs.split(/\s+/).filter((token) => token && !existingTokens.has(token));
+
+  if (newTokens.length === 0) {
+    return silentArgs;
+  }
+
+  return silentArgs ? `${silentArgs} ${newTokens.join(' ')}` : newTokens.join(' ');
+}
+
+/**
  * Normalize installer to standard format
  */
 export function normalizeInstaller(installer: WingetInstaller): NormalizedInstaller {
@@ -524,6 +549,8 @@ export function normalizeInstaller(installer: WingetInstaller): NormalizedInstal
   } else {
     silentArgs = getDefaultSilentSwitch(installer.InstallerType);
   }
+
+  silentArgs = appendCustomSwitch(silentArgs, installer.InstallerSwitches?.Custom);
 
   return {
     architecture: installer.Architecture,

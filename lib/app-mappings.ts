@@ -439,11 +439,6 @@ export const APP_MAPPINGS: AppMapping[] = [
     aliases: ['putty', 'put ty'],
     publisher: 'Simon Tatham',
   },
-  {
-    wingetId: 'FileZilla.Client',
-    aliases: ['filezilla', 'file zilla', 'filezilla client'],
-    publisher: 'FileZilla',
-  },
 
   // Database
   {
