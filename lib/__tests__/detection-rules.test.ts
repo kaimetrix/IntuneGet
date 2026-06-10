@@ -15,7 +15,61 @@ import type {
 
 describe('generateDetectionRules', () => {
   describe('MSI detection rules', () => {
-    it('should generate MSI product code rule when product code is available', () => {
+    it('should prefer registry marker over product code when wingetId and version are available', () => {
+      const installer: NormalizedInstaller = {
+        architecture: 'x64',
+        url: 'https://example.com/app.msi',
+        sha256: 'abc123',
+        type: 'msi',
+        productCode: '{12345678-1234-1234-1234-123456789012}',
+      };
+
+      const rules = generateDetectionRules(installer, 'Google Chrome', 'Google.Chrome', '120.0.6099.130');
+
+      expect(rules).toHaveLength(1);
+      expect(rules[0].type).toBe('registry');
+      const regRule = rules[0] as RegistryDetectionRule;
+      expect(regRule.keyPath).toBe('HKEY_LOCAL_MACHINE\\SOFTWARE\\IntuneGet\\Apps\\Google_Chrome');
+      expect(regRule.valueName).toBe('Version');
+      expect(regRule.detectionType).toBe('version');
+      expect(regRule.operator).toBe('greaterThanOrEqual');
+      expect(regRule.detectionValue).toBe('120.0.6099.130');
+    });
+
+    it('should use HKCU registry marker for user-scoped MSI installs', () => {
+      const installer: NormalizedInstaller = {
+        architecture: 'x64',
+        url: 'https://example.com/app.msi',
+        sha256: 'abc123',
+        type: 'msi',
+        scope: 'user',
+        productCode: '{12345678-1234-1234-1234-123456789012}',
+      };
+
+      const rules = generateDetectionRules(installer, 'Test App', 'Publisher.TestApp', '1.2.3');
+
+      expect(rules).toHaveLength(1);
+      expect(rules[0].type).toBe('registry');
+      const regRule = rules[0] as RegistryDetectionRule;
+      expect(regRule.keyPath).toBe('HKEY_CURRENT_USER\\SOFTWARE\\IntuneGet\\Apps\\Publisher_TestApp');
+    });
+
+    it('should use registry marker for WiX installers with wingetId and version', () => {
+      const installer: NormalizedInstaller = {
+        architecture: 'x64',
+        url: 'https://example.com/app.msi',
+        sha256: 'abc123',
+        type: 'wix',
+        productCode: '{ABCD1234-5678-90AB-CDEF-1234567890AB}',
+      };
+
+      const rules = generateDetectionRules(installer, 'WiX App', 'Publisher.WixApp', '2.0.0');
+
+      expect(rules).toHaveLength(1);
+      expect(rules[0].type).toBe('registry');
+    });
+
+    it('should generate MSI product code rule when wingetId and version are missing', () => {
       const installer: NormalizedInstaller = {
         architecture: 'x64',
         url: 'https://example.com/app.msi',

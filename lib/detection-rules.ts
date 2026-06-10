@@ -20,10 +20,15 @@ import { resolveInstallerFileName } from '@/lib/installer-filename';
  * Generate detection rules based on installer metadata
  *
  * Strategy (in order of preference):
- * 1. MSI Product Code - most reliable for MSI installers
- * 2. Registry marker (IntuneGet) - for EXE/Inno/Nullsoft when wingetId is provided
- * 3. Folder existence - simple and reliable (RoboPack approach)
- * 4. Script detection - fallback for MSIX/complex cases
+ * 1. Registry marker (IntuneGet) - when wingetId and version are provided. The
+ *    PSADT install script writes this marker for EVERY installer type
+ *    (including MSI), so it is the most reliable option across the board.
+ *    MSI product codes from winget manifests are NOT used as the primary rule
+ *    because many MSI apps change their product code every release, leaving
+ *    the deployed detection rule stale (e.g. Chrome, PDF-XChange).
+ * 2. MSI Product Code - fallback for MSI/WiX when wingetId/version are absent
+ * 3. Folder existence - simple last resort (RoboPack approach)
+ * 4. Script detection - for MSIX/APPX via Package Family Name
  *
  * @param installer - Normalized installer metadata
  * @param displayName - Application display name
@@ -39,8 +44,9 @@ export function generateDetectionRules(
   switch (installer.type) {
     case 'msi':
     case 'wix':
-      // MSI: Use product code if available, otherwise folder detection
-      return generateMsiDetectionRules(installer, displayName);
+      // MSI: Prefer registry marker (product codes go stale across versions),
+      // then product code, then folder detection
+      return generateMsiDetectionRules(installer, displayName, wingetId, version);
 
     case 'burn':
       // Burn bundles: Use registry marker if wingetId provided, otherwise folder detection
@@ -118,13 +124,25 @@ function generateRegistryMarkerDetectionRules(
 
 /**
  * Generate MSI-based detection rules
- * Uses MSI Product Code when available (most reliable)
+ *
+ * Prefers the IntuneGet registry marker over the MSI Product Code because
+ * product codes synced from winget manifests go stale - many MSI apps change
+ * their product code every release, so the deployed code no longer matches
+ * the installed one after an update. The PSADT install script writes the
+ * marker for all installer types including MSI.
  */
 function generateMsiDetectionRules(
   installer: NormalizedInstaller,
-  displayName: string
+  displayName: string,
+  wingetId?: string,
+  version?: string
 ): DetectionRule[] {
-  // Primary: MSI Product Code detection (most reliable)
+  // Primary: Registry marker detection (version-stable, written by PSADT)
+  if (wingetId && version) {
+    return generateRegistryMarkerDetectionRules(wingetId, version, installer.scope);
+  }
+
+  // Fallback: MSI Product Code detection
   if (installer.productCode) {
     return [
       {
