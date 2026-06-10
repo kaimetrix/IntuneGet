@@ -526,6 +526,14 @@ export const APP_MAPPINGS: AppMapping[] = [
 ];
 
 /**
+ * Minimum normalized length required before substring (includes) matching
+ * is allowed. Shorter aliases/names only match via exact equality, otherwise
+ * short aliases like "ff" (Firefox) would match inside unrelated names like
+ * "microsoftoffice".
+ */
+const MIN_SUBSTRING_MATCH_LENGTH = 6;
+
+/**
  * Get Winget ID from app name
  */
 export function getWingetIdFromName(name: string): string | null {
@@ -535,14 +543,26 @@ export function getWingetIdFromName(name: string): string | null {
     // Check aliases
     for (const alias of mapping.aliases) {
       const normalizedAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (normalizedName === normalizedAlias || normalizedName.includes(normalizedAlias)) {
+      if (normalizedName === normalizedAlias) {
+        return mapping.wingetId;
+      }
+      if (
+        normalizedAlias.length >= MIN_SUBSTRING_MATCH_LENGTH &&
+        normalizedName.includes(normalizedAlias)
+      ) {
         return mapping.wingetId;
       }
     }
 
     // Check Winget ID itself
     const normalizedId = mapping.wingetId.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normalizedName.includes(normalizedId) || normalizedId.includes(normalizedName)) {
+    if (normalizedName === normalizedId || normalizedName.includes(normalizedId)) {
+      return mapping.wingetId;
+    }
+    if (
+      normalizedName.length >= MIN_SUBSTRING_MATCH_LENGTH &&
+      normalizedId.includes(normalizedName)
+    ) {
       return mapping.wingetId;
     }
   }
@@ -645,19 +665,24 @@ export function findBestCuratedMatch(
 
   let bestMatch: CuratedAppMatch | null = null;
   let bestScore = 0;
+  let bestIsCorroborated = false;
 
   for (const app of curatedApps) {
     let score = 0;
+    let strongNameMatch = false;
+    let publisherMatch = false;
     const normalizedName = app.name.toLowerCase().replace(/[^a-z0-9]/g, '');
     const normalizedAppPublisher = app.publisher.toLowerCase().replace(/[^a-z0-9]/g, '');
 
     // Exact name match (highest priority)
     if (normalizedName === normalizedSearch) {
       score += 100;
+      strongNameMatch = true;
     }
     // Name starts with search term
     else if (normalizedName.startsWith(normalizedSearch)) {
       score += 70;
+      strongNameMatch = true;
     }
     // Name contains search term
     else if (normalizedName.includes(normalizedSearch)) {
@@ -671,8 +696,10 @@ export function findBestCuratedMatch(
     // Publisher match
     if (normalizedPublisher && normalizedAppPublisher === normalizedPublisher) {
       score += 30;
+      publisherMatch = true;
     } else if (normalizedPublisher && normalizedAppPublisher.includes(normalizedPublisher)) {
       score += 15;
+      publisherMatch = true;
     }
 
     // Has version (verified app)
@@ -683,9 +710,12 @@ export function findBestCuratedMatch(
     if (score > bestScore) {
       bestScore = score;
       bestMatch = app;
+      bestIsCorroborated = strongNameMatch || publisherMatch;
     }
   }
 
-  // Only return if confidence is high enough
-  return bestScore >= 50 ? bestMatch : null;
+  // Only return if confidence is high enough. A bare name-substring signal
+  // (plus incidental bonuses like the version bonus) is not enough on its
+  // own: require an exact/starts-with name match or publisher corroboration.
+  return bestScore >= 50 && bestIsCorroborated ? bestMatch : null;
 }

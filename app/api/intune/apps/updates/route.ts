@@ -40,6 +40,17 @@ interface UploadHistoryMappingRow {
   version: string | null;
 }
 
+interface ClaimedAppMappingRow {
+  intune_app_id: string | null;
+  discovered_app_name: string;
+  winget_package_id: string;
+}
+
+interface ManualAppMappingRow {
+  discovered_app_name: string;
+  winget_package_id: string;
+}
+
 function extractWingetIdFromDescription(description: string | null): string | null {
   if (!description) {
     return null;
@@ -161,6 +172,52 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Build explicit user-link mappings from the Discovered Apps feature.
+    // These take precedence over fuzzy matching: if a user explicitly linked
+    // an app to a Winget package, use that link with high confidence.
+    const claimedWingetByIntuneAppId = new Map<string, string>();
+    const claimedWingetByName = new Map<string, string>();
+    const { data: claimedRows } = await supabase
+      .from('claimed_apps')
+      .select('intune_app_id, discovered_app_name, winget_package_id')
+      .eq('tenant_id', tenantId);
+
+    if (claimedRows) {
+      for (const row of claimedRows as ClaimedAppMappingRow[]) {
+        if (!row.winget_package_id) {
+          continue;
+        }
+        if (row.intune_app_id) {
+          claimedWingetByIntuneAppId.set(row.intune_app_id, row.winget_package_id);
+        }
+        if (row.discovered_app_name) {
+          claimedWingetByName.set(
+            row.discovered_app_name.toLowerCase().trim(),
+            row.winget_package_id
+          );
+        }
+      }
+    }
+
+    // Manual mappings are keyed by lowercased display name; include tenant
+    // mappings and global (tenant_id is null) mappings.
+    const manualWingetByName = new Map<string, string>();
+    const { data: manualMappingRows } = await supabase
+      .from('manual_app_mappings')
+      .select('discovered_app_name, winget_package_id')
+      .or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
+
+    if (manualMappingRows) {
+      for (const row of manualMappingRows as ManualAppMappingRow[]) {
+        if (row.discovered_app_name && row.winget_package_id) {
+          manualWingetByName.set(
+            row.discovered_app_name.toLowerCase().trim(),
+            row.winget_package_id
+          );
+        }
+      }
+    }
+
     // Match apps to Winget IDs
     const updates: AppUpdateInfo[] = [];
     const checked: CheckedResult[] = [];
@@ -181,6 +238,21 @@ export async function GET(request: NextRequest) {
         matchedApps.push({
           app,
           wingetId: descriptionWingetId,
+        });
+        continue;
+      }
+
+      // Explicit user links (claimed apps and manual mappings) take
+      // precedence over fuzzy matching.
+      const normalizedDisplayName = app.displayName.toLowerCase().trim();
+      const explicitWingetId =
+        claimedWingetByIntuneAppId.get(app.id) ||
+        manualWingetByName.get(normalizedDisplayName) ||
+        claimedWingetByName.get(normalizedDisplayName);
+      if (explicitWingetId) {
+        matchedApps.push({
+          app,
+          wingetId: explicitWingetId,
         });
         continue;
       }

@@ -2,8 +2,6 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMicrosoftAuth } from './useMicrosoftAuth';
-import { useMspOptional } from './useMspOptional';
-import type { AppUpdateInfo } from '@/types/inventory';
 import type {
   AvailableUpdate,
   AutoUpdateHistoryWithPolicy,
@@ -11,52 +9,6 @@ import type {
   TriggerUpdateRequest,
   TriggerUpdateResponse,
 } from '@/types/update-policies';
-
-interface UpdatesResponse {
-  updates: AppUpdateInfo[];
-  updateCount: number;
-  totalApps: number;
-}
-
-export function useAppUpdates() {
-  const { getAccessToken, isAuthenticated } = useMicrosoftAuth();
-  const { isMspUser, selectedTenantId } = useMspOptional();
-
-  return useQuery<UpdatesResponse>({
-    queryKey: ['inventory', 'updates', isMspUser ? selectedTenantId || 'primary' : 'self'],
-    queryFn: async () => {
-      const token = await getAccessToken();
-      if (!token) {
-        // Return empty response instead of throwing to avoid console errors
-        return { updates: [], updateCount: 0, totalApps: 0 };
-      }
-
-      const response = await fetch('/api/intune/apps/updates', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(isMspUser && selectedTenantId ? { 'X-MSP-Tenant-Id': selectedTenantId } : {}),
-        },
-      });
-
-      if (!response.ok) {
-        // Return empty response for non-OK status to avoid noisy errors
-        // This handles cases like missing admin consent, invalid permissions, etc.
-        console.warn('Updates API returned non-OK status:', response.status);
-        return { updates: [], updateCount: 0, totalApps: 0 };
-      }
-
-      return response.json();
-    },
-    enabled: isAuthenticated,
-    staleTime: 10 * 60 * 1000, // 10 minutes - updates check is expensive
-    refetchOnWindowFocus: false,
-    retry: false, // Don't retry on failure - updates check is optional
-  });
-}
-
-// ============================================
-// New hooks for auto-update management
-// ============================================
 
 export interface AvailableUpdatesResponse {
   updates: AvailableUpdate[];

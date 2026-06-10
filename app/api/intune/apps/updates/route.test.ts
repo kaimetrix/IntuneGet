@@ -33,7 +33,20 @@ vi.mock('@/lib/app-matching', () => ({
 
 import { GET } from '@/app/api/intune/apps/updates/route';
 
-function createSupabaseMock(curatedRows: Array<{ winget_id: string; latest_version: string }>) {
+function createSupabaseMock(
+  curatedRows: Array<{ winget_id: string; latest_version: string }>,
+  options: {
+    claimedRows?: Array<{
+      intune_app_id: string | null;
+      discovered_app_name: string;
+      winget_package_id: string;
+    }>;
+    manualMappingRows?: Array<{
+      discovered_app_name: string;
+      winget_package_id: string;
+    }>;
+  } = {}
+) {
   return {
     from: (table: string) => {
       if (table === 'tenant_consent') {
@@ -50,6 +63,24 @@ function createSupabaseMock(curatedRows: Array<{ winget_id: string; latest_versi
         chain.eq = vi.fn(() => chain);
         chain.then = (resolve: (value: { data: unknown; error: unknown }) => unknown) =>
           Promise.resolve({ data: [], error: null }).then(resolve);
+        return chain;
+      }
+
+      if (table === 'claimed_apps') {
+        const chain: Record<string, unknown> = {};
+        chain.select = vi.fn(() => chain);
+        chain.eq = vi.fn(() => chain);
+        chain.then = (resolve: (value: { data: unknown; error: unknown }) => unknown) =>
+          Promise.resolve({ data: options.claimedRows || [], error: null }).then(resolve);
+        return chain;
+      }
+
+      if (table === 'manual_app_mappings') {
+        const chain: Record<string, unknown> = {};
+        chain.select = vi.fn(() => chain);
+        chain.or = vi.fn(() => chain);
+        chain.then = (resolve: (value: { data: unknown; error: unknown }) => unknown) =>
+          Promise.resolve({ data: options.manualMappingRows || [], error: null }).then(resolve);
         return chain;
       }
 
@@ -192,5 +223,123 @@ describe('GET /api/intune/apps/updates', () => {
     expect(body.updateCount).toBe(1);
     expect(body.updates[0].wingetId).toBe('VideoLAN.VLC');
     expect(matchAppToWingetWithDatabaseMock).toHaveBeenCalled();
+  });
+
+  it('uses explicit manual mappings before fuzzy matching', async () => {
+    createServerClientMock.mockReturnValue(
+      createSupabaseMock(
+        [{ winget_id: 'Contoso.CustomApp', latest_version: '2.0.0' }],
+        {
+          manualMappingRows: [
+            {
+              discovered_app_name: 'contoso custom app',
+              winget_package_id: 'Contoso.CustomApp',
+            },
+          ],
+        }
+      )
+    );
+
+    // Fuzzy matchers would produce a wrong match; they must not be consulted
+    matchAppToWingetMock.mockReturnValue({
+      confidence: 'high',
+      wingetId: 'Wrong.Package',
+      matchReason: 'Known app mapping',
+    });
+    matchAppToWingetWithDatabaseMock.mockResolvedValue(null);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: 'graph-token' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          value: [
+            {
+              id: 'app-1',
+              displayName: 'Contoso Custom App',
+              publisher: 'Contoso',
+              displayVersion: '1.0.0',
+              lastModifiedDateTime: '2026-02-02T00:00:00Z',
+            },
+          ],
+        }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = new NextRequest('http://localhost:3000/api/intune/apps/updates', {
+      headers: {
+        Authorization: 'Bearer mock-token',
+      },
+    });
+
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.updateCount).toBe(1);
+    expect(body.updates[0].wingetId).toBe('Contoso.CustomApp');
+    expect(matchAppToWingetMock).not.toHaveBeenCalled();
+    expect(matchAppToWingetWithDatabaseMock).not.toHaveBeenCalled();
+  });
+
+  it('uses claimed app links before fuzzy matching', async () => {
+    createServerClientMock.mockReturnValue(
+      createSupabaseMock(
+        [{ winget_id: 'Fabrikam.Tool', latest_version: '3.1.0' }],
+        {
+          claimedRows: [
+            {
+              intune_app_id: 'app-claimed',
+              discovered_app_name: 'Fabrikam Tool',
+              winget_package_id: 'Fabrikam.Tool',
+            },
+          ],
+        }
+      )
+    );
+
+    matchAppToWingetMock.mockReturnValue(null);
+    matchAppToWingetWithDatabaseMock.mockResolvedValue(null);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: 'graph-token' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          value: [
+            {
+              id: 'app-claimed',
+              displayName: 'Fabrikam Tool Renamed',
+              publisher: 'Fabrikam',
+              displayVersion: '3.0.0',
+              lastModifiedDateTime: '2026-02-02T00:00:00Z',
+            },
+          ],
+        }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = new NextRequest('http://localhost:3000/api/intune/apps/updates', {
+      headers: {
+        Authorization: 'Bearer mock-token',
+      },
+    });
+
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.updateCount).toBe(1);
+    expect(body.updates[0].wingetId).toBe('Fabrikam.Tool');
+    expect(matchAppToWingetMock).not.toHaveBeenCalled();
+    expect(matchAppToWingetWithDatabaseMock).not.toHaveBeenCalled();
   });
 });
