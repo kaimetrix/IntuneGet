@@ -5,7 +5,7 @@ import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion
 import { ArrowRight, Star, Users, Upload, BookOpen } from "lucide-react";
 import { Github } from "@/components/icons/brand-icons";
 import Link from "next/link";
-import { T, Var, useGT } from "gt-next";
+import { T, Var, useGT, useLocale } from "gt-next";
 import { Badge } from "../ui/Badge";
 import { GradientOrb } from "../ui/GradientOrb";
 import { DeploymentFeed } from "../ui/DeploymentFeed";
@@ -19,14 +19,18 @@ const MotionLink = motion.create(Link);
 
 export function HeroSection() {
   const t = useGT();
+  // gt-next locale is identical on server and client; the browser's implicit
+  // locale is not, and a bare toLocaleString() breaks hydration for non-en users.
+  // An empty locale string would make toLocaleString throw a RangeError.
+  const localeTag = useLocale() || undefined;
   const { stars } = useGitHubStats();
   const { signinClicks, appsDeployed, appsSupported } = useLandingStats();
   const shouldReduceMotion = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
-  const starsDisplay = stars.toLocaleString();
-  const signinsDisplay = signinClicks.toLocaleString();
-  const appsDeployedDisplay = appsDeployed.toLocaleString();
-  const supportedAppsDisplay = appsSupported.toLocaleString();
+  const starsDisplay = stars.toLocaleString(localeTag);
+  const signinsDisplay = signinClicks.toLocaleString(localeTag);
+  const appsDeployedDisplay = appsDeployed.toLocaleString(localeTag);
+  const supportedAppsDisplay = appsSupported.toLocaleString(localeTag);
 
   // 3B: Parallax for gradient orbs
   const { scrollY } = useScroll();

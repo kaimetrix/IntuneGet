@@ -58,10 +58,10 @@ function setCachedStats(stats: typeof DEFAULT_STATS): void {
 }
 
 export function useGitHubStats(): GitHubStats {
-  const [stats, setStats] = useState<typeof DEFAULT_STATS>(() => {
-    const cached = getCachedStats();
-    return cached || DEFAULT_STATS;
-  });
+  // Initial state must be deterministic: the server cannot read localStorage,
+  // so seeding from cache here would make hydration text mismatch for
+  // returning visitors. The effect below applies the cache after mount.
+  const [stats, setStats] = useState<typeof DEFAULT_STATS>(DEFAULT_STATS);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
