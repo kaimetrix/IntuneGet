@@ -267,6 +267,11 @@ function parsePsadtConfig(packageConfig: unknown): DeploymentConfig['psadtConfig
   return psadtConfig as unknown as DeploymentConfig['psadtConfig'];
 }
 
+// Batches of up to 10 apps run sequentially (DB lookups, job creation, and a
+// workflow dispatch each); the platform default duration times out mid-batch
+// and returns a non-JSON error page to the client
+export const maxDuration = 300;
+
 /**
  * POST /api/updates/trigger
  * Manually trigger update deployment for one or more apps
@@ -326,6 +331,23 @@ export async function POST(request: NextRequest) {
       failed: 0,
       results: [],
     };
+
+    // Read the user's global update settings once for the whole batch - they
+    // do not change mid-request and per-item reads add up across 10 apps
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: userSettingsRow, error: userSettingsError } = await (supabase as any)
+      .from('user_settings')
+      .select('settings')
+      .eq('user_id', user.userId)
+      .maybeSingle();
+    if (userSettingsError) {
+      console.warn(
+        `Failed to read user_settings for ${user.userId}: ${userSettingsError.message}`
+      );
+    }
+    const userSettings = (userSettingsRow?.settings as Record<string, unknown> | null) || null;
+    const globalCarryOver = Boolean(userSettings?.carryOverAssignments);
+    const supersedePrevious = Boolean(userSettings?.supersedePreviousApp);
 
     for (const req of updateRequests) {
       let restorePolicyState: {
@@ -407,24 +429,11 @@ export async function POST(request: NextRequest) {
             let assignmentMigration = parseAssignmentMigration(packageConfig);
 
             // If no explicit migration config was stored on the packaging job,
-            // fall back to the user's global carryOverAssignments setting.
+            // fall back to the user's global carryOverAssignments setting
+            // (read once for the whole batch above).
             // Note: createPackagingJob() also re-reads the global setting at
             // trigger time, so the value here is for policy record consistency.
             if (!assignmentMigration) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const { data: userSettingsRow, error: settingsError } = await (supabase as any)
-                .from('user_settings')
-                .select('settings')
-                .eq('user_id', user.userId)
-                .maybeSingle();
-              if (settingsError) {
-                console.warn(
-                  `Failed to read user_settings for ${user.userId}: ${settingsError.message}`
-                );
-              }
-              const globalCarryOver = Boolean(
-                (userSettingsRow?.settings as Record<string, unknown> | null)?.carryOverAssignments
-              );
               assignmentMigration = {
                 carryOverAssignments: globalCarryOver,
                 removeAssignmentsFromPreviousApp: globalCarryOver,
@@ -573,20 +582,9 @@ export async function POST(request: NextRequest) {
 
             const deploymentConfig = policy.deployment_config as unknown as DeploymentConfig;
 
-            // Read the user's current global carry-over setting directly
-            // instead of relying on the stored policy value (which may be stale).
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: carryOverRow } = await (supabase as any)
-              .from('user_settings')
-              .select('settings')
-              .eq('user_id', user.userId)
-              .maybeSingle();
-            const currentCarryOver = Boolean(
-              (carryOverRow?.settings as Record<string, unknown> | null)?.carryOverAssignments
-            );
-            const supersedePrevious = Boolean(
-              (carryOverRow?.settings as Record<string, unknown> | null)?.supersedePreviousApp
-            );
+            // Global settings were read once before the loop; the stored
+            // policy value may be stale, so the current setting wins
+            const currentCarryOver = globalCarryOver;
 
             const workflowInputs: WorkflowInputs = {
               jobId: triggerResult.packagingJobId,

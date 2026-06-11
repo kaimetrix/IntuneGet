@@ -256,12 +256,31 @@ export function useTriggerUpdate() {
         body: JSON.stringify(request),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to trigger update');
+      // Gateway timeouts and crashes return non-JSON bodies; parse defensively
+      // so the real failure (e.g. 504) surfaces instead of a JSON.parse error
+      const raw = await response.text();
+      let parsed: unknown = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
       }
 
-      return response.json();
+      if (!response.ok) {
+        const message =
+          (parsed as { error?: string } | null)?.error ||
+          `Update request failed with status ${response.status}` +
+            (response.status === 504 || response.status === 502
+              ? ' - the request may have timed out; retry or update fewer apps at once'
+              : '');
+        throw new Error(message);
+      }
+
+      if (!parsed) {
+        throw new Error('Update request returned an unreadable response');
+      }
+
+      return parsed as TriggerUpdateResponse;
     },
     onSuccess: () => {
       // Invalidate related queries
