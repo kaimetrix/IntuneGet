@@ -173,6 +173,7 @@ export interface NormalizedInstaller {
   silentArgs?: string;
   productCode?: string;
   packageFamilyName?: string;
+  packageDependencies?: Array<{ packageIdentifier: string; minimumVersion?: string }>;
 }
 
 // Microsoft Store manifest enrichment (fetched from public Store APIs)

@@ -78,6 +78,7 @@ export function useBulkAdd(): UseBulkAddReturn {
               installerType: installer.type,
               nestedInstallerType: installer.nestedInstallerType,
               nestedInstallerPath: installer.nestedInstallerPath,
+              manifestDependencies: installer.packageDependencies,
               installerUrl: installer.url,
               installerSha256: installer.sha256,
               installCommand: generateInstallCommand(installer, installer.scope || 'machine'),

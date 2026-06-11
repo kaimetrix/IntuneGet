@@ -21,9 +21,15 @@ import type {
   SupersedenceType,
 } from '@/types/intune';
 
+interface ManifestDependency {
+  packageIdentifier: string;
+  minimumVersion?: string;
+}
+
 interface DependencyConfigProps {
   relationships: AppRelationship[];
   onChange: (relationships: AppRelationship[]) => void;
+  manifestDependencies?: ManifestDependency[];
 }
 
 interface TenantApp {
@@ -38,7 +44,7 @@ interface InventoryResponse {
   count: number;
 }
 
-export function DependencyConfig({ relationships, onChange }: DependencyConfigProps) {
+export function DependencyConfig({ relationships, onChange, manifestDependencies }: DependencyConfigProps) {
   const [enabled, setEnabled] = useState(() => relationships.length > 0);
   const [query, setQuery] = useState('');
   const [tenantApps, setTenantApps] = useState<TenantApp[]>([]);
@@ -95,6 +101,19 @@ export function DependencyConfig({ relationships, onChange }: DependencyConfigPr
   const selectedIds = useMemo(
     () => new Set(relationships.map((r) => r.targetId)),
     [relationships]
+  );
+
+  // Best-effort match of a winget dependency id against the tenant app list
+  const findManifestMatch = useCallback(
+    (packageIdentifier: string): TenantApp | undefined => {
+      const lastSegment = (packageIdentifier.split('.').pop() || packageIdentifier).toLowerCase();
+      if (!lastSegment) return undefined;
+      return tenantApps.find((app) => {
+        const name = app.displayName.toLowerCase();
+        return name.includes(lastSegment) || lastSegment.includes(name);
+      });
+    },
+    [tenantApps]
   );
 
   const filteredApps = useMemo(() => {
@@ -196,6 +215,49 @@ export function DependencyConfig({ relationships, onChange }: DependencyConfigPr
               Target apps must already exist in your Intune tenant. Apps in the same deployment batch cannot reference each other.
             </p>
           </div>
+
+          {/* Manifest dependency suggestions */}
+          {manifestDependencies && manifestDependencies.length > 0 && (
+            <div className="rounded-lg border border-overlay/15 bg-bg-elevated/60 p-3 space-y-2">
+              <p className="text-xs font-medium text-text-secondary">
+                Suggested by the app&apos;s manifest
+              </p>
+              {manifestDependencies.map((dep) => {
+                const match = findManifestMatch(dep.packageIdentifier);
+                const alreadyAdded = match ? selectedIds.has(match.id) : false;
+                return (
+                  <div
+                    key={dep.packageIdentifier}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs text-text-primary truncate">{dep.packageIdentifier}</p>
+                      {dep.minimumVersion && (
+                        <p className="text-xs text-text-muted">min v{dep.minimumVersion}</p>
+                      )}
+                    </div>
+                    {match ? (
+                      alreadyAdded ? (
+                        <span className="text-xs text-text-muted flex-shrink-0">Added</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => addRelationship(match)}
+                          className="px-2 py-1 rounded-md border border-overlay/15 bg-bg-elevated text-xs text-text-secondary hover:bg-overlay/10 transition-colors flex-shrink-0"
+                        >
+                          Add
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-text-muted flex-shrink-0">
+                        Deploy {dep.packageIdentifier} first, then add it here
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Selected relationships */}
           {relationships.length > 0 && (

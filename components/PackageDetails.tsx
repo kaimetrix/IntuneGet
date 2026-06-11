@@ -118,6 +118,7 @@ export function PackageDetails({ package: pkg, onClose }: PackageDetailsProps) {
       installerSha256: selectedInstaller.sha256,
       nestedInstallerType: selectedInstaller.nestedInstallerType,
       nestedInstallerPath: selectedInstaller.nestedInstallerPath,
+      manifestDependencies: selectedInstaller.packageDependencies,
       installCommand: generateInstallCommand(selectedInstaller, selectedScope),
       uninstallCommand: generateUninstallCommand(selectedInstaller, pkg.name),
       detectionRules,

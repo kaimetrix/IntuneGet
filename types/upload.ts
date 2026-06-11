@@ -172,6 +172,8 @@ export interface Win32CartItem extends CartItemBase {
   detectionRules: DetectionRule[];
   requirementRules?: RequirementRule[];
   psadtConfig: PSADTConfig;
+  // Package dependencies declared in the winget manifest (hints for DependencyConfig)
+  manifestDependencies?: Array<{ packageIdentifier: string; minimumVersion?: string }>;
 }
 
 // Microsoft Store app - deployed via Graph API winGetApp (single API call, no packaging)

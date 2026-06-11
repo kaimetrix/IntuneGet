@@ -342,6 +342,7 @@ function coerceInstallersArray(rawInstallers: unknown, defaultType?: string): Wi
     ProductCode: inst.ProductCode as string,
     PackageFamilyName: inst.PackageFamilyName as string,
     UpgradeBehavior: inst.UpgradeBehavior as WingetInstaller['UpgradeBehavior'],
+    Dependencies: inst.Dependencies as WingetInstaller['Dependencies'],
   }));
 }
 
@@ -449,6 +450,7 @@ function normalizeInstallers(manifest: Record<string, unknown>): WingetInstaller
   const defaultPlatform = manifest.Platform as string[];
   const defaultMinOS = manifest.MinimumOSVersion as string;
   const defaultUpgrade = manifest.UpgradeBehavior as string;
+  const defaultDependencies = manifest.Dependencies as WingetInstaller['Dependencies'];
 
   return rawInstallers.map((installer) => ({
     Architecture: (installer.Architecture as WingetInstaller['Architecture']) || 'x64',
@@ -473,6 +475,8 @@ function normalizeInstallers(manifest: Record<string, unknown>): WingetInstaller
     InstallerLocale: installer.InstallerLocale as string,
     Platform: (installer.Platform as string[]) || defaultPlatform,
     MinimumOSVersion: (installer.MinimumOSVersion as string) || defaultMinOS,
+    Dependencies: (installer.Dependencies as WingetInstaller['Dependencies']) ||
+                  defaultDependencies,
   }));
 }
 
@@ -568,6 +572,17 @@ export function normalizeInstaller(installer: WingetInstaller): NormalizedInstal
 
   silentArgs = appendCustomSwitch(silentArgs, installer.InstallerSwitches?.Custom);
 
+  // Map manifest package dependencies (PascalCase) to the normalized shape
+  const rawDependencies = installer.Dependencies?.PackageDependencies;
+  const packageDependencies = Array.isArray(rawDependencies)
+    ? rawDependencies
+        .filter((dep) => typeof dep?.PackageIdentifier === 'string' && dep.PackageIdentifier.length > 0)
+        .map((dep) => ({
+          packageIdentifier: dep.PackageIdentifier,
+          minimumVersion: typeof dep.MinimumVersion === 'string' ? dep.MinimumVersion : undefined,
+        }))
+    : [];
+
   return {
     architecture: installer.Architecture,
     url: installer.InstallerUrl,
@@ -579,6 +594,7 @@ export function normalizeInstaller(installer: WingetInstaller): NormalizedInstal
     silentArgs,
     productCode: installer.ProductCode,
     packageFamilyName: installer.PackageFamilyName,
+    packageDependencies: packageDependencies.length > 0 ? packageDependencies : undefined,
   };
 }
 

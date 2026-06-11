@@ -1099,6 +1099,7 @@ export function CartItemConfig({ item, onClose }: CartItemConfigProps) {
                 <DependencyConfig
                   relationships={relationships}
                   onChange={setRelationships}
+                  manifestDependencies={item.manifestDependencies}
                 />
               </ConfigSection>}
 

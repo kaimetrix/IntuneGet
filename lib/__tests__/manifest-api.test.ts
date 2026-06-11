@@ -400,6 +400,82 @@ describe('normalizeInstaller', () => {
     });
   });
 
+  describe('manifest package dependencies', () => {
+    it('should map PackageDependencies to packageDependencies with identifier and minimum version', () => {
+      // e.g. PowerToys depends on Microsoft.DotNet.DesktopRuntime.8
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        Dependencies: {
+          PackageDependencies: [
+            { PackageIdentifier: 'Microsoft.DotNet.DesktopRuntime.8', MinimumVersion: '8.0.0' },
+            { PackageIdentifier: 'Microsoft.VCRedist.2015+.x64' },
+          ],
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.packageDependencies).toEqual([
+        { packageIdentifier: 'Microsoft.DotNet.DesktopRuntime.8', minimumVersion: '8.0.0' },
+        { packageIdentifier: 'Microsoft.VCRedist.2015+.x64', minimumVersion: undefined },
+      ]);
+    });
+
+    it('should leave packageDependencies undefined when Dependencies is absent', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.packageDependencies).toBeUndefined();
+    });
+
+    it('should leave packageDependencies undefined when PackageDependencies is empty', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        Dependencies: {
+          WindowsFeatures: ['NetFx3'],
+          PackageDependencies: [],
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.packageDependencies).toBeUndefined();
+    });
+
+    it('should skip dependency entries without a PackageIdentifier', () => {
+      const installer: WingetInstaller = {
+        Architecture: 'x64',
+        InstallerUrl: 'https://example.com/installer.exe',
+        InstallerSha256: 'abc123',
+        InstallerType: 'exe',
+        Dependencies: {
+          PackageDependencies: [
+            { PackageIdentifier: '' },
+            { PackageIdentifier: 'Microsoft.DotNet.DesktopRuntime.8' },
+          ],
+        },
+      };
+
+      const result = normalizeInstaller(installer);
+
+      expect(result.packageDependencies).toEqual([
+        { packageIdentifier: 'Microsoft.DotNet.DesktopRuntime.8', minimumVersion: undefined },
+      ]);
+    });
+  });
+
   describe('architecture handling', () => {
     it('should handle x64 architecture', () => {
       const installer: WingetInstaller = {

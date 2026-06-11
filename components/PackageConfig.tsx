@@ -333,6 +333,7 @@ export function PackageConfig({ package: pkg, installers, onClose, isDeployed = 
           installerSha256: selectedInstaller!.sha256,
           nestedInstallerType: selectedInstaller!.nestedInstallerType,
           nestedInstallerPath: selectedInstaller!.nestedInstallerPath,
+          manifestDependencies: selectedInstaller!.packageDependencies,
           installCommand: config.installCommand || generateInstallCommand(selectedInstaller!, selectedScope),
           uninstallCommand: config.uninstallCommand || generateUninstallCommand(selectedInstaller!, pkg.name),
           detectionRules: config.detectionRules,
@@ -1612,6 +1613,7 @@ export function PackageConfig({ package: pkg, installers, onClose, isDeployed = 
                 <DependencyConfig
                   relationships={relationships}
                   onChange={setRelationships}
+                  manifestDependencies={selectedInstaller?.packageDependencies}
                 />
               </ConfigSection>}
 

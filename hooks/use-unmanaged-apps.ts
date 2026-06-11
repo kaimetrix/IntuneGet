@@ -358,6 +358,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
         installerType: recommendedInstaller.type,
         nestedInstallerType: recommendedInstaller.nestedInstallerType,
         nestedInstallerPath: recommendedInstaller.nestedInstallerPath,
+        manifestDependencies: recommendedInstaller.packageDependencies,
         installerUrl: recommendedInstaller.url,
         installerSha256: recommendedInstaller.sha256,
         installCommand: generateInstallCommand(
@@ -463,6 +464,7 @@ export function useUnmanagedApps(): UseUnmanagedAppsReturn {
         installerType: recommendedInstaller.type,
         nestedInstallerType: recommendedInstaller.nestedInstallerType,
         nestedInstallerPath: recommendedInstaller.nestedInstallerPath,
+        manifestDependencies: recommendedInstaller.packageDependencies,
         installerUrl: recommendedInstaller.url,
         installerSha256: recommendedInstaller.sha256,
         installCommand: generateInstallCommand(
