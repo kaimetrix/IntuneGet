@@ -185,5 +185,105 @@ describe('AutoUpdateTrigger psadtConfig handling', () => {
       expect(jobData.package_config.nestedInstallerType).toBe('exe');
       expect(jobData.package_config.nestedInstallerPath).toBe('setup-2.0.0.exe');
     });
+
+    it('persists relationships and auto-supersedence info on the new job package_config', async () => {
+      const relationships = [
+        {
+          relationshipType: 'dependency' as const,
+          targetId: 'dep-app-1',
+          targetDisplayName: 'Dependency App',
+          dependencyType: 'autoInstall' as const,
+        },
+      ];
+      const insertSpy = vi.fn();
+      const supabase = createSupabaseMock({
+        user_profiles: { singleResult: { data: { email: 'user@example.com' }, error: null } },
+        user_settings: {
+          maybeSingleResult: {
+            data: { settings: { supersedePreviousApp: true } },
+            error: null,
+          },
+        },
+        packaging_jobs: {
+          insertSpy,
+          singleResult: { data: { id: 'job-3' }, error: null },
+        },
+      });
+      const trigger = makeTrigger(supabase);
+      const policy = makePolicy({
+        displayName: 'Test App',
+        publisher: 'Test Publisher',
+        architecture: 'x64',
+        installerType: 'zip',
+        installCommand: 'setup.exe /S',
+        uninstallCommand: '',
+        installScope: 'machine',
+        detectionRules: [],
+        relationships,
+      } as Partial<DeploymentConfig>);
+
+      await (trigger as unknown as {
+        createPackagingJob: (
+          p: AppUpdatePolicy,
+          u: typeof UPDATE_INFO & { currentIntuneAppId?: string },
+          h: string
+        ) => Promise<{ id: string }>;
+      }).createPackagingJob(
+        policy,
+        { ...UPDATE_INFO, currentIntuneAppId: 'prev-app-1' },
+        'history-1'
+      );
+
+      expect(insertSpy).toHaveBeenCalledTimes(1);
+      const jobData = insertSpy.mock.calls[0][0] as {
+        package_config: Record<string, unknown>;
+      };
+      expect(jobData.package_config.relationships).toEqual(relationships);
+      expect(jobData.package_config.autoSupersede).toBe(true);
+      expect(jobData.package_config.sourceIntuneAppId).toBe('prev-app-1');
+      expect(jobData.package_config.supersedenceType).toBe('update');
+    });
+
+    it('does not flag auto-supersedence when the user setting is off', async () => {
+      const insertSpy = vi.fn();
+      const supabase = createSupabaseMock({
+        user_profiles: { singleResult: { data: { email: 'user@example.com' }, error: null } },
+        user_settings: { maybeSingleResult: { data: null, error: null } },
+        packaging_jobs: {
+          insertSpy,
+          singleResult: { data: { id: 'job-4' }, error: null },
+        },
+      });
+      const trigger = makeTrigger(supabase);
+      const policy = makePolicy({
+        displayName: 'Test App',
+        publisher: 'Test Publisher',
+        architecture: 'x64',
+        installerType: 'zip',
+        installCommand: 'setup.exe /S',
+        uninstallCommand: '',
+        installScope: 'machine',
+        detectionRules: [],
+      } as Partial<DeploymentConfig>);
+
+      await (trigger as unknown as {
+        createPackagingJob: (
+          p: AppUpdatePolicy,
+          u: typeof UPDATE_INFO & { currentIntuneAppId?: string },
+          h: string
+        ) => Promise<{ id: string }>;
+      }).createPackagingJob(
+        policy,
+        { ...UPDATE_INFO, currentIntuneAppId: 'prev-app-1' },
+        'history-1'
+      );
+
+      expect(insertSpy).toHaveBeenCalledTimes(1);
+      const jobData = insertSpy.mock.calls[0][0] as {
+        package_config: Record<string, unknown>;
+      };
+      expect(jobData.package_config.autoSupersede).toBe(false);
+      expect(jobData.package_config.supersedenceType).toBeUndefined();
+    });
   });
 });

@@ -59,6 +59,10 @@ function sanitizeSettings(payload: Record<string, unknown>): UserSettingsUpdate 
     updates.carryOverAssignments = payload.carryOverAssignments;
   }
 
+  if (isBoolean(payload.supersedePreviousApp)) {
+    updates.supersedePreviousApp = payload.supersedePreviousApp;
+  }
+
   return updates;
 }
 

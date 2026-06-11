@@ -35,7 +35,11 @@ jobs:
       DETECTION_RULES: ${{ github.event.client_payload.config.detectionRules }}
       ASSIGNMENTS: ${{ github.event.client_payload.config.assignments }}
       CATEGORIES: ${{ github.event.client_payload.config.categories }}
+      RELATIONSHIPS: ${{ github.event.client_payload.config.relationships }}
       INSTALL_SCOPE: ${{ github.event.client_payload.config.installScope }}
+      SOURCE_INTUNE_APP_ID: ${{ github.event.client_payload.config.sourceIntuneAppId }}
+      AUTO_SUPERSEDE: ${{ github.event.client_payload.config.autoSupersede }}
+      SUPERSEDENCE_TYPE: ${{ github.event.client_payload.config.supersedenceType }}
       INTUNEWINAPPUTIL_URL: https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool/raw/master/IntuneWinAppUtil.exe
       INTUNEWINAPPUTIL_SHA256: C1BA45B5CB939E84AF064BB7FF4B38FB3DFE33C8DC1078FD9B157672EAE671F6
       PSADT_TEMPLATE_URL: https://github.com/PSAppDeployToolkit/PSAppDeployToolkit/releases/download/4.1.8/PSAppDeployToolkit_Template_v4.zip
@@ -1760,6 +1764,108 @@ jobs:
           }
 
           Write-Host "Applied $($categoryIds.Count) category(s) to app"
+
+      - name: Apply app relationships
+        if: success()
+        env:
+          CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+        run: |
+          $relationshipsJson = $env:RELATIONSHIPS
+          $hasConfiguredRelationships = $relationshipsJson -and $relationshipsJson -ne '[]'
+          $autoSupersede = $env:AUTO_SUPERSEDE -eq 'true'
+          $sourceAppId = $env:SOURCE_INTUNE_APP_ID
+          $hasSourceApp = $sourceAppId -and $sourceAppId.Length -gt 0
+
+          # Determine if we have any relationship work to do
+          if (-not $hasConfiguredRelationships -and -not ($autoSupersede -and $hasSourceApp)) {
+            Write-Host "No app relationships configured and no auto-supersedence requested, skipping..."
+            exit 0
+          }
+
+          . "$env:GITHUB_WORKSPACE\Send-Callback.ps1"
+
+          Send-Callback -Body @{
+            jobId = $env:JOB_ID
+            status = "uploading"
+            message = "Applying app relationships..."
+            progress = 96
+          } -CallbackUrl $env:CALLBACK_URL -CallbackSecret $env:CALLBACK_SECRET | Out-Null
+
+          $headers = @{
+            "Authorization" = "Bearer $env:GRAPH_TOKEN"
+            "Content-Type" = "application/json"
+          }
+
+          $graphRelationships = @()
+
+          if ($hasConfiguredRelationships) {
+            $relationships = @()
+            try {
+              $relationships = $relationshipsJson | ConvertFrom-Json
+            } catch {
+              Write-Host "::warning::Could not parse relationships JSON: $($_.Exception.Message)"
+            }
+
+            foreach ($relationship in $relationships) {
+              if (-not $relationship.targetId) { continue }
+
+              switch ($relationship.relationshipType) {
+                'dependency' {
+                  $dependencyType = if ($relationship.dependencyType) { $relationship.dependencyType } else { 'autoInstall' }
+                  $graphRelationships += @{
+                    '@odata.type' = '#microsoft.graph.mobileAppDependency'
+                    targetId = $relationship.targetId
+                    dependencyType = $dependencyType
+                  }
+                }
+                'supersedence' {
+                  $supersedenceType = if ($relationship.supersedenceType) { $relationship.supersedenceType } else { 'update' }
+                  $graphRelationships += @{
+                    '@odata.type' = '#microsoft.graph.mobileAppSupersedence'
+                    targetId = $relationship.targetId
+                    supersedenceType = $supersedenceType
+                  }
+                }
+                default {
+                  Write-Host "::warning::Skipping relationship with unknown type '$($relationship.relationshipType)'"
+                }
+              }
+            }
+          }
+
+          # Auto-supersedence: mark the new app as superseding the previous version
+          if ($autoSupersede -and $hasSourceApp) {
+            $alreadyTargeted = $graphRelationships | Where-Object { $_.targetId -eq $sourceAppId }
+            if ($alreadyTargeted) {
+              Write-Host "Previous app $sourceAppId is already targeted by a configured relationship, skipping auto-supersedence"
+            } else {
+              $autoSupersedenceType = if ($env:SUPERSEDENCE_TYPE) { $env:SUPERSEDENCE_TYPE } else { 'update' }
+              $graphRelationships += @{
+                '@odata.type' = '#microsoft.graph.mobileAppSupersedence'
+                targetId = $sourceAppId
+                supersedenceType = $autoSupersedenceType
+              }
+            }
+          }
+
+          if ($graphRelationships.Count -eq 0) {
+            Write-Host "No app relationships to apply"
+            exit 0
+          }
+
+          # updateRelationships replaces the full collection - send one call with the complete list
+          $body = @{
+            relationships = $graphRelationships
+          } | ConvertTo-Json -Depth 10
+
+          try {
+            Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$env:INTUNE_APP_ID/updateRelationships" -Method POST -Headers $headers -Body $body
+            Write-Host "Applied $($graphRelationships.Count) app relationship(s) to app"
+          } catch {
+            $errMsg = $_.Exception.Message
+            Write-Host "::warning::Failed to apply app relationships: $errMsg"
+            Write-Host "::warning::App was deployed to Intune but relationships could not be applied. The admin can apply them manually."
+          }
 
       - name: Send success callback
         if: success()

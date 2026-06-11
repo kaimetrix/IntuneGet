@@ -4,7 +4,7 @@
  */
 
 import type { Json } from './database';
-import type { DetectionRule, RequirementRule } from './intune';
+import type { AppRelationship, DetectionRule, RequirementRule } from './intune';
 import type { PSADTConfig } from './psadt';
 import type { IntuneAppCategorySelection, PackageAssignment } from './upload';
 
@@ -51,6 +51,10 @@ export interface DeploymentConfig {
 
   // Requirement rules for "Update Only" mode (optional)
   requirementRules?: RequirementRule[];
+
+  // App relationships (dependencies / supersedence) carried over from the
+  // original deployment (optional)
+  relationships?: AppRelationship[];
 
   // Update deployment behavior (optional)
   forceCreateNewApp?: boolean;

@@ -349,10 +349,13 @@ export class AutoUpdateTrigger {
   }
 
   /**
-   * Read the user's current global carryOverAssignments setting.
-   * This is the single source of truth, not the stored policy value.
+   * Read the user's current global update settings (carryOverAssignments
+   * and supersedePreviousApp). These are the single source of truth, not
+   * the stored policy values.
    */
-  private async getUserCarryOverSetting(userId: string): Promise<boolean> {
+  private async getUserUpdateSettings(
+    userId: string
+  ): Promise<{ carryOverAssignments: boolean; supersedePreviousApp: boolean }> {
     const { data, error } = await this.supabase
       .from('user_settings')
       .select('settings')
@@ -363,11 +366,14 @@ export class AutoUpdateTrigger {
       console.warn(
         `Failed to read user_settings for ${userId}: ${error.message}`
       );
-      return false;
+      return { carryOverAssignments: false, supersedePreviousApp: false };
     }
 
     const settings = data?.settings as Record<string, unknown> | null;
-    return Boolean(settings?.carryOverAssignments);
+    return {
+      carryOverAssignments: Boolean(settings?.carryOverAssignments),
+      supersedePreviousApp: Boolean(settings?.supersedePreviousApp),
+    };
   }
 
   /**
@@ -448,15 +454,17 @@ export class AutoUpdateTrigger {
     const assignments = normalizeAssignments(config);
     const categories = normalizeCategories(config);
 
-    // Always re-read the user's current global setting instead of trusting
-    // the stored policy value, which may be stale if the user toggled the
-    // setting after the policy was created.
-    const globalCarryOver = await this.getUserCarryOverSetting(policy.user_id);
+    // Always re-read the user's current global settings instead of trusting
+    // the stored policy values, which may be stale if the user toggled the
+    // settings after the policy was created.
+    const { carryOverAssignments: globalCarryOver, supersedePreviousApp } =
+      await this.getUserUpdateSettings(policy.user_id);
     const assignmentMigration = {
       carryOverAssignments: globalCarryOver,
       removeAssignmentsFromPreviousApp: globalCarryOver,
     };
     const sourceIntuneAppId = updateInfo.currentIntuneAppId || null;
+    const autoSupersede = supersedePreviousApp && Boolean(sourceIntuneAppId);
 
     // Get user email for the job
     const { data: userProfile } = await this.supabase
@@ -486,6 +494,9 @@ export class AutoUpdateTrigger {
         categories,
         assignedGroups: config.assignedGroups,
         requirementRules: config.requirementRules,
+        // App relationships (dependencies/supersedence) from the original
+        // deployment are read from package_config by the packager
+        relationships: config.relationships,
         // PSADT settings and nested installer info are read from
         // package_config by the local packager (job-processor.ts)
         psadtConfig: config.psadtConfig,
@@ -493,6 +504,8 @@ export class AutoUpdateTrigger {
         nestedInstallerPath: updateInfo.nestedInstallerPath,
         forceCreate: config.forceCreateNewApp !== false,
         sourceIntuneAppId,
+        autoSupersede,
+        supersedenceType: autoSupersede ? 'update' : undefined,
         assignmentMigration: {
           carryOverAssignments: Boolean(assignmentMigration.carryOverAssignments),
           removeAssignmentsFromPreviousApp: Boolean(

@@ -29,11 +29,14 @@ export interface WorkflowInputs {
   assignments?: string; // JSON-serialized PackageAssignment[]
   categories?: string; // JSON-serialized IntuneAppCategorySelection[]
   espProfiles?: string; // JSON-serialized EspProfileSelection[]
+  relationships?: string; // JSON-serialized AppRelationship[]
   installScope?: 'machine' | 'user'; // Install scope for per-user vs per-machine
   forceCreate?: boolean; // Skip duplicate check and force create new app
   sourceIntuneAppId?: string; // Previous app ID for assignment carry-over
   carryOverAssignments?: boolean; // Copy assignments from previous app
   removeAssignmentsFromPreviousApp?: boolean; // Remove assignments from previous app after carry-over
+  autoSupersede?: boolean; // Mark the new app as superseding the previous app
+  supersedenceType?: string; // Supersedence type for auto-supersede ('update' | 'replace')
 }
 
 export interface GitHubActionsConfig {
@@ -155,11 +158,14 @@ export async function triggerPackagingWorkflow(
           assignments: inputs.assignments || '[]',
           categories: inputs.categories || '[]',
           espProfiles: inputs.espProfiles || '[]',
+          relationships: inputs.relationships || '[]',
           installScope: inputs.installScope || 'machine',
           forceCreate: inputs.forceCreate ? 'true' : 'false',
           sourceIntuneAppId: inputs.sourceIntuneAppId || '',
           carryOverAssignments: inputs.carryOverAssignments ? 'true' : 'false',
           removeAssignmentsFromPreviousApp: inputs.removeAssignmentsFromPreviousApp ? 'true' : 'false',
+          autoSupersede: inputs.autoSupersede ? 'true' : 'false',
+          supersedenceType: inputs.supersedenceType || '',
         },
       },
     }),

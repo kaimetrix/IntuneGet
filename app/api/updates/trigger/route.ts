@@ -27,7 +27,7 @@ import type {
   DeploymentConfig,
 } from '@/types/update-policies';
 import type { IntuneAppCategorySelection, PackageAssignment } from '@/types/upload';
-import type { DetectionRule, RequirementRule } from '@/types/intune';
+import type { AppRelationship, DetectionRule, RequirementRule } from '@/types/intune';
 import type { NormalizedInstaller } from '@/types/winget';
 import type { Json } from '@/types/database';
 
@@ -41,6 +41,7 @@ interface PackageConfigWithAssignments {
     assignmentType?: 'required' | 'available' | 'uninstall' | 'updateOnly';
   }>;
   requirementRules?: RequirementRule[];
+  relationships?: AppRelationship[];
   assignmentMigration?: {
     carryOverAssignments?: boolean;
     removeAssignmentsFromPreviousApp?: boolean;
@@ -118,6 +119,50 @@ function parseRequirementRules(packageConfig: unknown): RequirementRule[] | unde
     return typedConfig.requirementRules as RequirementRule[];
   }
   return undefined;
+}
+
+function parseAppRelationships(packageConfig: unknown): AppRelationship[] {
+  if (!isObject(packageConfig)) {
+    return [];
+  }
+
+  const relationships = packageConfig.relationships;
+  if (!Array.isArray(relationships)) {
+    return [];
+  }
+
+  return relationships.filter((relationship): relationship is AppRelationship => {
+    if (!isObject(relationship)) {
+      return false;
+    }
+
+    const relationshipType = relationship.relationshipType;
+    if (relationshipType !== 'dependency' && relationshipType !== 'supersedence') {
+      return false;
+    }
+
+    if (typeof relationship.targetId !== 'string' || relationship.targetId.length === 0) {
+      return false;
+    }
+
+    if (
+      relationship.dependencyType !== undefined &&
+      relationship.dependencyType !== 'detect' &&
+      relationship.dependencyType !== 'autoInstall'
+    ) {
+      return false;
+    }
+
+    if (
+      relationship.supersedenceType !== undefined &&
+      relationship.supersedenceType !== 'update' &&
+      relationship.supersedenceType !== 'replace'
+    ) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function parseAssignmentMigration(packageConfig: unknown): DeploymentConfig['assignmentMigration'] | undefined {
@@ -358,6 +403,7 @@ export async function POST(request: NextRequest) {
             const parsedAssignments = parsePackageAssignments(packageConfig);
             const parsedCategories = parsePackageCategories(packageConfig);
             const parsedRequirementRules = parseRequirementRules(packageConfig);
+            const parsedRelationships = parseAppRelationships(packageConfig);
             let assignmentMigration = parseAssignmentMigration(packageConfig);
 
             // If no explicit migration config was stored on the packaging job,
@@ -397,6 +443,7 @@ export async function POST(request: NextRequest) {
               assignments: parsedAssignments,
               categories: parsedCategories,
               requirementRules: parsedRequirementRules,
+              relationships: parsedRelationships.length > 0 ? parsedRelationships : undefined,
               psadtConfig: parsePsadtConfig(packageConfig),
               forceCreateNewApp: true,
               assignmentMigration,
@@ -537,6 +584,9 @@ export async function POST(request: NextRequest) {
             const currentCarryOver = Boolean(
               (carryOverRow?.settings as Record<string, unknown> | null)?.carryOverAssignments
             );
+            const supersedePrevious = Boolean(
+              (carryOverRow?.settings as Record<string, unknown> | null)?.supersedePreviousApp
+            );
 
             const workflowInputs: WorkflowInputs = {
               jobId: triggerResult.packagingJobId,
@@ -578,11 +628,16 @@ export async function POST(request: NextRequest) {
               requirementRules: deploymentConfig.requirementRules
                 ? JSON.stringify(deploymentConfig.requirementRules)
                 : undefined,
+              relationships: deploymentConfig.relationships && deploymentConfig.relationships.length > 0
+                ? JSON.stringify(deploymentConfig.relationships)
+                : undefined,
               installScope: (deploymentConfig.installScope === 'user' ? 'user' : 'machine') as 'machine' | 'user',
               forceCreate: deploymentConfig.forceCreateNewApp !== false,
               sourceIntuneAppId: installerInfo.currentIntuneAppId || undefined,
               carryOverAssignments: currentCarryOver,
               removeAssignmentsFromPreviousApp: currentCarryOver,
+              autoSupersede: supersedePrevious,
+              supersedenceType: supersedePrevious ? 'update' : undefined,
             };
 
             const isBatch = updateRequests.length > 1;

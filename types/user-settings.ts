@@ -10,6 +10,7 @@ export interface UserSettings {
   quickStartDismissed: boolean;
   onboardingCompleted: boolean;
   carryOverAssignments: boolean;
+  supersedePreviousApp: boolean;
 }
 
 export type UserSettingsUpdate = Partial<UserSettings>;
@@ -23,6 +24,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   quickStartDismissed: false,
   onboardingCompleted: false,
   carryOverAssignments: false,
+  supersedePreviousApp: false,
 };
 
 export interface UserSettingsResponse {

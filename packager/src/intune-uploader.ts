@@ -827,44 +827,62 @@ export class IntuneUploader {
     job: PackagingJob
   ): Promise<void> {
     const relationships = this.extractRelationships(job);
-    if (relationships.length === 0) {
-      this.logger.debug('No relationships to apply', { appId });
-      return;
-    }
 
-    for (const rel of relationships) {
-      const body: Record<string, unknown> = {
-        targetId: rel.targetId,
-      };
-
+    const items: Array<Record<string, unknown>> = relationships.map((rel) => {
       if (rel.relationshipType === 'dependency') {
-        body['@odata.type'] = '#microsoft.graph.mobileAppDependency';
-        body.dependencyType = rel.dependencyType || 'autoInstall';
-      } else {
-        body['@odata.type'] = '#microsoft.graph.mobileAppSupersedence';
-        body.supersedenceType = rel.supersedenceType || 'update';
-      }
-
-      try {
-        await graphClient.post(
-          `/deviceAppManagement/mobileApps/${appId}/relationships`,
-          body
-        );
-      } catch (err) {
-        // Non-fatal: log warning but don't fail the deployment
-        this.logger.warn('Failed to apply relationship', {
-          appId,
+        return {
+          '@odata.type': '#microsoft.graph.mobileAppDependency',
           targetId: rel.targetId,
-          type: rel.relationshipType,
-          error: err instanceof Error ? err.message : String(err),
+          dependencyType: rel.dependencyType || 'autoInstall',
+        };
+      }
+      return {
+        '@odata.type': '#microsoft.graph.mobileAppSupersedence',
+        targetId: rel.targetId,
+        supersedenceType: rel.supersedenceType || 'update',
+      };
+    });
+
+    // Auto-supersede the previously deployed app version when requested
+    const packageConfig = this.asRecord(job.package_config);
+    const sourceIntuneAppId = typeof packageConfig?.sourceIntuneAppId === 'string'
+      ? packageConfig.sourceIntuneAppId
+      : '';
+    if (packageConfig?.autoSupersede === true && sourceIntuneAppId.length > 0) {
+      const alreadyTargeted = relationships.some((rel) => rel.targetId === sourceIntuneAppId);
+      if (!alreadyTargeted) {
+        const supType = packageConfig.supersedenceType;
+        items.push({
+          '@odata.type': '#microsoft.graph.mobileAppSupersedence',
+          targetId: sourceIntuneAppId,
+          supersedenceType: supType === 'update' || supType === 'replace' ? supType : 'update',
         });
       }
     }
 
-    this.logger.info('Applied relationships to app', {
-      appId,
-      relationshipCount: relationships.length,
-    });
+    if (items.length === 0) {
+      this.logger.debug('No relationships to apply', { appId });
+      return;
+    }
+
+    try {
+      // Documented Graph action: replaces the app's relationships in one call
+      await graphClient.post(
+        `/deviceAppManagement/mobileApps/${appId}/updateRelationships`,
+        { relationships: items }
+      );
+      this.logger.info('Applied relationships to app', {
+        appId,
+        relationshipCount: items.length,
+      });
+    } catch (err) {
+      // Non-fatal: log warning but don't fail the deployment
+      this.logger.warn('Failed to apply relationships', {
+        appId,
+        relationshipCount: items.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private extractExplicitAssignments(job: PackagingJob): PackageAssignment[] {

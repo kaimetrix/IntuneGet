@@ -31,7 +31,7 @@ import { useCartStore } from '@/stores/cart-store';
 import { clearConsentPending, isConsentPending } from '@/components/AdminConsentBanner';
 
 type SettingsTab = 'general' | 'permissions' | 'notifications' | 'exports' | 'data';
-type PreferenceKey = 'theme' | 'cart' | 'assignments';
+type PreferenceKey = 'theme' | 'cart' | 'assignments' | 'supersedence';
 
 type PermissionErrorType =
   | 'missing_credentials'
@@ -77,7 +77,7 @@ export default function SettingsPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [activePreferenceSave, setActivePreferenceSave] = useState<PreferenceKey | null>(null);
   const [lastUpdatedPreference, setLastUpdatedPreference] = useState<PreferenceKey | null>(null);
-  const { settings: userSettings, isSaving, syncError, setCartAutoOpenOnAdd, setCarryOverAssignments } = useUserSettings();
+  const { settings: userSettings, isSaving, syncError, setCartAutoOpenOnAdd, setCarryOverAssignments, setSupersedePreviousApp } = useUserSettings();
   const autoOpenOnAdd = userSettings.cartAutoOpenOnAdd;
   const setAutoOpenOnAddStore = useCartStore((state) => state.setAutoOpenOnAdd);
   const { theme, setTheme } = useTheme();
@@ -120,6 +120,19 @@ export default function SettingsPage() {
       }
     },
     [setCarryOverAssignments]
+  );
+
+  const handleSupersedenceToggle = useCallback(
+    async (value: boolean) => {
+      setActivePreferenceSave('supersedence');
+      setLastUpdatedPreference('supersedence');
+      try {
+        await setSupersedePreviousApp(value);
+      } finally {
+        setActivePreferenceSave(null);
+      }
+    },
+    [setSupersedePreviousApp]
   );
 
   const handleCheckPermissions = async () => {
@@ -500,6 +513,34 @@ export default function SettingsPage() {
                           <span className="text-xs text-text-muted"><T>Saving...</T></span>
                         )}
                         {!isSaving && syncError && lastUpdatedPreference === 'assignments' && (
+                          <span className="text-xs text-status-warning"><T>Saved locally</T></span>
+                        )}
+                      </div>
+                    </div>
+                  </motion.section>
+
+                  {/* Supersede previous version card */}
+                  <motion.section
+                    variants={itemVariants}
+                    className="glass-light rounded-xl p-6 border border-overlay/5 hover:border-accent-cyan/20 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-text-primary font-medium"><T>Supersede previous version on update</T></p>
+                        <p className="text-sm text-text-muted">
+                          <T>When an app is updated, mark the new version as superseding the replaced one in Intune. The previous app keeps working but Intune treats the new app as its update.</T>
+                        </p>
+                      </div>
+                      <div className="flex min-w-28 flex-col items-end gap-1">
+                        <ToggleSwitch
+                          checked={userSettings.supersedePreviousApp}
+                          onChange={(value) => void handleSupersedenceToggle(value)}
+                          disabled={isSaving && activePreferenceSave !== 'supersedence'}
+                        />
+                        {isSaving && activePreferenceSave === 'supersedence' && (
+                          <span className="text-xs text-text-muted"><T>Saving...</T></span>
+                        )}
+                        {!isSaving && syncError && lastUpdatedPreference === 'supersedence' && (
                           <span className="text-xs text-status-warning"><T>Saved locally</T></span>
                         )}
                       </div>

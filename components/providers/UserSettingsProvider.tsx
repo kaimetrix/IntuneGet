@@ -35,6 +35,7 @@ type UserSettingsContextValue = {
   setQuickStartDismissed: (dismissed: boolean) => Promise<void>;
   setOnboardingCompleted: (completed: boolean) => Promise<void>;
   setCarryOverAssignments: (enabled: boolean) => Promise<void>;
+  setSupersedePreviousApp: (enabled: boolean) => Promise<void>;
 };
 
 const UserSettingsContext = createContext<UserSettingsContextValue | null>(null);
@@ -47,6 +48,7 @@ const VIEW_MODE_KEY = "intuneget-view-mode";
 const QUICK_START_DISMISSED_KEY = "intuneget-quick-start-dismissed";
 const ONBOARDING_COMPLETED_KEY = "intuneget-onboarding-completed";
 const CARRY_OVER_ASSIGNMENTS_KEY = "intuneget-carry-over-assignments";
+const SUPERSEDE_PREVIOUS_APP_KEY = "intuneget-supersede-previous-app";
 
 function isThemeMode(value: unknown): value is ThemeMode {
   return value === "light" || value === "dark";
@@ -136,6 +138,7 @@ function readLegacyUserSettings(): {
   const quickStartDismissedValue = readBooleanStorageValue(QUICK_START_DISMISSED_KEY);
   const onboardingCompletedValue = readBooleanStorageValue(ONBOARDING_COMPLETED_KEY);
   const carryOverAssignmentsValue = readBooleanStorageValue(CARRY_OVER_ASSIGNMENTS_KEY);
+  const supersedePreviousAppValue = readBooleanStorageValue(SUPERSEDE_PREVIOUS_APP_KEY);
 
   const hasTheme = isThemeMode(themeValue);
   const fallbackTheme = getSystemPrefersDark() ? "dark" : DEFAULT_USER_SETTINGS.theme;
@@ -146,6 +149,7 @@ function readLegacyUserSettings(): {
   const hasQuickStartDismissed = quickStartDismissedValue !== null;
   const hasOnboardingCompleted = onboardingCompletedValue !== null;
   const hasCarryOverAssignments = carryOverAssignmentsValue !== null;
+  const hasSupersedePreviousApp = supersedePreviousAppValue !== null;
 
   return {
     settings: {
@@ -158,6 +162,7 @@ function readLegacyUserSettings(): {
       ...(hasQuickStartDismissed ? { quickStartDismissed: quickStartDismissedValue === true } : {}),
       ...(hasOnboardingCompleted ? { onboardingCompleted: onboardingCompletedValue === true } : {}),
       ...(hasCarryOverAssignments ? { carryOverAssignments: carryOverAssignmentsValue === true } : {}),
+      ...(hasSupersedePreviousApp ? { supersedePreviousApp: supersedePreviousAppValue === true } : {}),
     },
     hasTheme,
     hasSidebarCollapsed,
@@ -247,6 +252,10 @@ function persistLocally(update: UserSettingsUpdate) {
 
   if (update.carryOverAssignments !== undefined) {
     writeBooleanSetting(CARRY_OVER_ASSIGNMENTS_KEY, update.carryOverAssignments);
+  }
+
+  if (update.supersedePreviousApp !== undefined) {
+    writeBooleanSetting(SUPERSEDE_PREVIOUS_APP_KEY, update.supersedePreviousApp);
   }
 }
 
@@ -446,6 +455,13 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
     [updateSettings]
   );
 
+  const setSupersedePreviousApp = useCallback(
+    async (supersedePreviousApp: boolean) => {
+      await updateSettings({ supersedePreviousApp });
+    },
+    [updateSettings]
+  );
+
   const value = useMemo<UserSettingsContextValue>(
     () => ({
       settings,
@@ -461,6 +477,7 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
       setQuickStartDismissed,
       setOnboardingCompleted,
       setCarryOverAssignments,
+      setSupersedePreviousApp,
     }),
     [
       hasStoredSettings,
@@ -475,6 +492,7 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
       setQuickStartDismissed,
       setOnboardingCompleted,
       setCarryOverAssignments,
+      setSupersedePreviousApp,
       syncError,
     ]
   );

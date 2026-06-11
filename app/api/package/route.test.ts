@@ -2,18 +2,76 @@ import { NextRequest } from 'next/server';
 import { STALE_JOB_TIMEOUT_MINUTES, STALE_JOB_ERROR_MESSAGE } from '@/lib/stale-jobs';
 import type { PackagingJob } from '@/lib/db/types';
 
-const { getDatabaseMock, getByUserIdMock, getByIdMock, updateMock } = vi.hoisted(() => ({
+const {
+  getDatabaseMock,
+  getByUserIdMock,
+  getByIdMock,
+  updateMock,
+  createMock,
+  parseAccessTokenMock,
+  checkStoredConsentMock,
+  verifyTenantConsentMock,
+  isGitHubActionsConfiguredMock,
+  triggerPackagingWorkflowMock,
+  getAppConfigMock,
+  getFeatureFlagsMock,
+} = vi.hoisted(() => ({
   getDatabaseMock: vi.fn(),
   getByUserIdMock: vi.fn(),
   getByIdMock: vi.fn(),
   updateMock: vi.fn(),
+  createMock: vi.fn(),
+  parseAccessTokenMock: vi.fn(),
+  checkStoredConsentMock: vi.fn(),
+  verifyTenantConsentMock: vi.fn(),
+  isGitHubActionsConfiguredMock: vi.fn(),
+  triggerPackagingWorkflowMock: vi.fn(),
+  getAppConfigMock: vi.fn(),
+  getFeatureFlagsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
   getDatabase: getDatabaseMock,
 }));
 
-import { GET } from '@/app/api/package/route';
+vi.mock('@/lib/auth-utils', () => ({
+  parseAccessToken: parseAccessTokenMock,
+}));
+
+vi.mock('@/lib/msp/consent-cache', () => ({
+  checkStoredConsent: checkStoredConsentMock,
+}));
+
+vi.mock('@/lib/msp/consent-verification', () => ({
+  verifyTenantConsent: verifyTenantConsentMock,
+}));
+
+vi.mock('@/lib/github-actions', () => ({
+  isGitHubActionsConfigured: isGitHubActionsConfiguredMock,
+  triggerPackagingWorkflow: triggerPackagingWorkflowMock,
+}));
+
+vi.mock('@/lib/config', () => ({
+  getAppConfig: getAppConfigMock,
+}));
+
+vi.mock('@/lib/features', () => ({
+  getFeatureFlags: getFeatureFlagsMock,
+}));
+
+vi.mock('@/lib/supabase', () => ({
+  createServerClient: vi.fn(),
+}));
+
+vi.mock('@/lib/graph-token', () => ({
+  acquireGraphToken: vi.fn(),
+}));
+
+vi.mock('@/lib/store-app-deploy', () => ({
+  deployStoreApp: vi.fn(),
+}));
+
+import { GET, POST } from '@/app/api/package/route';
 
 function makeJob(overrides: Partial<PackagingJob>): PackagingJob {
   const now = new Date().toISOString();
@@ -143,5 +201,103 @@ describe('GET /api/package (userId listing)', () => {
 
     expect(response.status).toBe(200);
     expect(body.jobs[0].status).toBe('packaging');
+  });
+});
+
+describe('POST /api/package (workflow dispatch)', () => {
+  const relationships = [
+    {
+      relationshipType: 'supersedence',
+      targetId: 'old-app-1',
+      targetDisplayName: 'Old App',
+      supersedenceType: 'replace',
+    },
+  ];
+
+  function makeWin32Item(overrides: Record<string, unknown> = {}) {
+    return {
+      wingetId: 'Test.App',
+      displayName: 'Test App',
+      publisher: 'Test',
+      version: '1.0.0',
+      architecture: 'x64',
+      installerType: 'exe',
+      installerUrl: 'https://example.com/setup.exe',
+      installerSha256: 'abc123',
+      installCommand: 'setup.exe /S',
+      uninstallCommand: 'uninstall.exe /S',
+      installScope: 'machine',
+      detectionRules: [],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getDatabaseMock.mockReturnValue({
+      jobs: {
+        create: createMock,
+        update: updateMock,
+      },
+    });
+    createMock.mockImplementation(async (data: Record<string, unknown>) => ({
+      ...data,
+      created_at: new Date().toISOString(),
+    }));
+    updateMock.mockResolvedValue({});
+    parseAccessTokenMock.mockResolvedValue({
+      userId: 'user-1',
+      userEmail: 'user@example.com',
+      tenantId: 'tenant-1',
+      userName: 'User',
+    });
+    checkStoredConsentMock.mockResolvedValue(true);
+    getFeatureFlagsMock.mockReturnValue({ pipeline: true, localPackager: false });
+    isGitHubActionsConfiguredMock.mockReturnValue(true);
+    getAppConfigMock.mockReturnValue({ app: { url: 'http://localhost:3000' } });
+    triggerPackagingWorkflowMock.mockResolvedValue({ success: true });
+  });
+
+  it('forwards item relationships into the workflow inputs', async () => {
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ items: [makeWin32Item({ relationships })] }),
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(triggerPackagingWorkflowMock).toHaveBeenCalledTimes(1);
+    expect(triggerPackagingWorkflowMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wingetId: 'Test.App',
+        relationships: JSON.stringify(relationships),
+      }),
+      undefined,
+      expect.any(Object)
+    );
+  });
+
+  it('omits relationships from the workflow inputs when none are configured', async () => {
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ items: [makeWin32Item()] }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(triggerPackagingWorkflowMock).toHaveBeenCalledTimes(1);
+    expect(triggerPackagingWorkflowMock.mock.calls[0][0].relationships).toBeUndefined();
   });
 });
