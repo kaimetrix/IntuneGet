@@ -21,12 +21,14 @@ import {
   X,
   ListChecks,
   Check,
+  Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppSearch } from '@/components/AppSearch';
 import { AppCard } from '@/components/AppCard';
 import { AppListItem } from '@/components/AppListItem';
 import { PackageConfig } from '@/components/PackageConfig';
+import { CustomAppModal } from '@/components/CustomAppModal';
 import { UploadCart } from '@/components/UploadCart';
 import { FeaturedApps } from '@/components/FeaturedApps';
 import { AppCollection } from '@/components/AppCollection';
@@ -88,6 +90,9 @@ export default function AppCatalogPage() {
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [isSortSectionOpen, setIsSortSectionOpen] = useState(true);
   const [isCategoriesSectionOpen, setIsCategoriesSectionOpen] = useState(true);
+
+  // Custom app modal state
+  const [isCustomAppModalOpen, setIsCustomAppModalOpen] = useState(false);
 
   // Bulk selection state
   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
@@ -643,6 +648,16 @@ export default function AppCatalogPage() {
                   <span className="hidden sm:inline">{isBulkSelectMode ? <T>Cancel</T> : <T>Select</T>}</span>
                 </button>
 
+                {/* Custom app via installer URL */}
+                <button
+                  onClick={() => setIsCustomAppModalOpen(true)}
+                  aria-label="Add custom app"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-overlay/10 bg-bg-surface text-sm text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span className="hidden sm:inline"><T>Custom app</T></span>
+                </button>
+
                 <div className="inline-flex items-center rounded-lg border border-overlay/10 bg-bg-surface p-0.5" role="group" aria-label="View mode">
                   <button
                     onClick={() => setViewMode('grid')}
@@ -895,6 +910,10 @@ export default function AppCatalogPage() {
             </div>
           )}
         </>
+      )}
+
+      {isCustomAppModalOpen && (
+        <CustomAppModal onClose={() => setIsCustomAppModalOpen(false)} />
       )}
 
       {selectedPackage && ((isSelectedStoreApp && !isLoadingStoreManifest) || (!isSelectedStoreApp && !isLoadingInstallers && selectedInstallers.length > 0)) && !(isSelectedDeployed && isLoadingDeployedConfig) && (

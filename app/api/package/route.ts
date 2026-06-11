@@ -15,6 +15,7 @@ import {
 import { getAppConfig } from '@/lib/config';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { getFeatureFlags } from '@/lib/features';
+import { isValidInstallerUrl } from '@/lib/custom-app';
 import { verifyTenantConsent } from '@/lib/msp/consent-verification';
 import { checkStoredConsent } from '@/lib/msp/consent-cache';
 import { extractSilentSwitches } from '@/lib/msp/silent-switches';
@@ -190,6 +191,20 @@ export async function POST(request: NextRequest) {
       } else {
         // Treat missing appSource as win32 for backward compatibility
         win32Items.push(item as Win32CartItem);
+      }
+    }
+
+    // Validate installer URLs for win32 items. Custom apps (issue #109)
+    // accept arbitrary user-provided URLs, so reject anything that is not
+    // a well-formed http(s) URL before queueing packaging jobs.
+    for (const item of win32Items) {
+      if (!isValidInstallerUrl(item.installerUrl)) {
+        return NextResponse.json(
+          {
+            error: `Invalid installer URL for "${item.displayName || item.wingetId}": the installer URL must be a valid http or https URL`,
+          },
+          { status: 400 }
+        );
       }
     }
 

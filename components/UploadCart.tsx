@@ -300,6 +300,11 @@ export function UploadCart() {
                             <span className="px-2 py-1 bg-bg-elevated rounded text-text-primary text-xs uppercase border border-overlay/5">
                               {item.installerType}
                             </span>
+                            {item.sourceType === 'custom' && (
+                              <span className="px-2 py-1 bg-amber-500/10 rounded text-amber-300 text-xs font-medium border border-amber-500/20">
+                                Custom
+                              </span>
+                            )}
                           </>
                         ) : null}
                         {item.forceCreate && (
