@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useMicrosoftAuth } from '@/hooks/useMicrosoftAuth';
 import { AdminConsentBanner } from '@/components/AdminConsentBanner';
+import { FilterPermissionNudge } from '@/components/FilterPermissionNudge';
 import { useDashboardStats } from '@/hooks/useAnalytics';
 import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
 import { RecentActivityList, PageHeader } from '@/components/dashboard';
@@ -104,6 +105,9 @@ export default function DashboardPage() {
 
       {/* Admin consent banner */}
       <AdminConsentBanner />
+
+      {/* Non-blocking nudge to re-consent for the assignment-filters permission */}
+      <FilterPermissionNudge />
 
       {/* Needs Attention section */}
       {attentionItems.length > 0 && (
