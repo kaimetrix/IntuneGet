@@ -407,6 +407,7 @@ ${this.getPreInstallRemovalBlock(job, appName)}
     ## Install the application
     ${this.getInstallCommand(job, installerFileName, silentSwitches)}
 ${this.getPostInstallVerificationBlock(job, appName)}
+${this.getPostCommandsBlock(job, 'postInstallCommands', 'Install-ADTDeployment')}
     ## Create IntuneGet detection marker for Intune detection rules
     ${this.getRegistryMarkerCreation(job)}
 }
@@ -418,7 +419,7 @@ function Uninstall-ADTDeployment
 
     ## Uninstall the application
     ${this.getUninstallCommand(job)}
-
+${this.getPostCommandsBlock(job, 'postUninstallCommands', 'Uninstall-ADTDeployment')}
     ## Remove IntuneGet detection marker
     ${this.getRegistryMarkerRemoval(job)}
 }
@@ -527,6 +528,47 @@ catch
       return null;
     }
     return value.trim();
+  }
+
+  /**
+   * Generate PowerShell for additional post-install / post-uninstall commands
+   * (issue #118). Each entry runs as its own Start-ADTProcess (cmd.exe /c) step,
+   * in order, mirroring the custom-override pattern. Returns '' when none.
+   * Kept in sync with .github/scripts/Create-PSADTPackage.ps1.
+   */
+  private getPostCommandsBlock(
+    job: PackagingJob,
+    key: 'postInstallCommands' | 'postUninstallCommands',
+    source: 'Install-ADTDeployment' | 'Uninstall-ADTDeployment'
+  ): string {
+    const psadtConfig = this.getPsadtConfig(job);
+    const raw = psadtConfig?.[key];
+    if (!Array.isArray(raw)) {
+      return '';
+    }
+    const commands = raw
+      .filter((c): c is string => typeof c === 'string')
+      // Collapse embedded newlines to spaces so a command can never break out of
+      // the single-quoted string it is embedded in within the generated script.
+      .map((c) => c.replace(/[\r\n]+/g, ' ').trim())
+      .filter((c) => c.length > 0);
+    if (commands.length === 0) {
+      return '';
+    }
+
+    const phase = source === 'Install-ADTDeployment' ? 'post-install' : 'post-uninstall';
+    const steps = commands
+      .map((cmd) => {
+        const escaped = cmd.replace(/'/g, "''");
+        return `    Write-ADTLogEntry -Message 'Executing ${phase} command: ${escaped}' -Severity 'Info' -Source '${source}'
+    Start-ADTProcess -FilePath "$env:SystemRoot\\System32\\cmd.exe" -ArgumentList '/c ${escaped}' -WorkingDirectory $adtSession.DirFiles -WindowStyle Hidden`;
+      })
+      .join('\n');
+
+    return `
+    ## Custom ${phase} commands (user-specified)
+${steps}
+`;
   }
 
   /**

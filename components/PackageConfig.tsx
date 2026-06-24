@@ -456,6 +456,32 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
     }));
   };
 
+  // Post-install / post-uninstall command list editors (#118)
+  const addCommand = (key: 'postInstallCommands' | 'postUninstallCommands') => {
+    setConfig((prev) => ({ ...prev, [key]: [...(prev[key] || []), ''] }));
+  };
+
+  const updateCommand = (
+    key: 'postInstallCommands' | 'postUninstallCommands',
+    index: number,
+    value: string
+  ) => {
+    setConfig((prev) => ({
+      ...prev,
+      [key]: (prev[key] || []).map((c, i) => (i === index ? value : c)),
+    }));
+  };
+
+  const removeCommand = (
+    key: 'postInstallCommands' | 'postUninstallCommands',
+    index: number
+  ) => {
+    setConfig((prev) => ({
+      ...prev,
+      [key]: (prev[key] || []).filter((_, i) => i !== index),
+    }));
+  };
+
   const toggleSection = (section: ConfigSection) => {
     setExpandedSection(expandedSection === section ? null : section);
   };
@@ -1847,6 +1873,84 @@ export function PackageConfig({ package: pkg, installers, versions = [], onClose
                       placeholder={selectedInstaller ? generateUninstallCommand(selectedInstaller, pkg.name) : ''}
                       className="w-full px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
                     />
+                  </div>
+
+                  {/* Post-install commands (#118) */}
+                  <div>
+                    <label className="block text-sm font-medium text-text-secondary mb-2">
+                      Post-install commands
+                    </label>
+                    <div className="space-y-2">
+                      {(config.postInstallCommands || []).map((cmd, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={cmd}
+                            onChange={(e) => updateCommand('postInstallCommands', index, e.target.value)}
+                            placeholder={'e.g. powershell.exe -NoProfile -Command "Remove-Item \'$env:Public\\Desktop\\App.lnk\' -Force"'}
+                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeCommand('postInstallCommands', index)}
+                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+                            aria-label="Remove command"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => addCommand('postInstallCommands')}
+                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add command
+                      </button>
+                    </div>
+                    <p className="text-text-muted text-xs mt-1">
+                      Run after the app installs (in order), e.g. to remove a desktop shortcut. Each runs via cmd.exe; a failure fails the deployment.
+                    </p>
+                  </div>
+
+                  {/* Post-uninstall commands (#118) */}
+                  <div>
+                    <label className="block text-sm font-medium text-text-secondary mb-2">
+                      Post-uninstall commands
+                    </label>
+                    <div className="space-y-2">
+                      {(config.postUninstallCommands || []).map((cmd, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={cmd}
+                            onChange={(e) => updateCommand('postUninstallCommands', index, e.target.value)}
+                            placeholder={'e.g. cmd.exe /c rmdir /s /q "C:\\ProgramData\\App"'}
+                            className="flex-1 px-3 py-2 bg-bg-elevated border border-overlay/15 rounded-lg text-text-primary text-sm font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeCommand('postUninstallCommands', index)}
+                            className="flex-shrink-0 text-text-muted hover:text-red-400 transition-colors p-1"
+                            aria-label="Remove command"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => addCommand('postUninstallCommands')}
+                        className="flex items-center gap-1.5 text-xs font-medium text-accent-cyan hover:text-accent-cyan/80 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add command
+                      </button>
+                    </div>
+                    <p className="text-text-muted text-xs mt-1">
+                      Run after the app uninstalls (in order), e.g. to clean up leftover files.
+                    </p>
                   </div>
                 </div>
               </ConfigSection>}

@@ -287,6 +287,19 @@ $customUninstallCommand = if ($psadtConfig.uninstallCommand) { ([string]$psadtCo
 # Only escape single quotes - overrides are embedded in single-quoted strings in the generated script
 $customInstallCommandEscaped = $customInstallCommand -replace "'", "''"
 $customUninstallCommandEscaped = $customUninstallCommand -replace "'", "''"
+
+# Additional post-install / post-uninstall commands (issue #118). Each runs as its
+# own Start-ADTProcess (cmd.exe /c) step after the main install/uninstall, in order.
+# Collapse embedded newlines to spaces so a command can never break out of the
+# single-quoted string it is embedded in within the generated script.
+$postInstallCommands = @()
+if ($psadtConfig.postInstallCommands) {
+    $postInstallCommands = @($psadtConfig.postInstallCommands | ForEach-Object { (([string]$_) -replace '[\r\n]+', ' ').Trim() } | Where-Object { $_ })
+}
+$postUninstallCommands = @()
+if ($psadtConfig.postUninstallCommands) {
+    $postUninstallCommands = @($psadtConfig.postUninstallCommands | ForEach-Object { (([string]$_) -replace '[\r\n]+', ' ').Trim() } | Where-Object { $_ })
+}
 # Custom detection marker root from PSADT config (issue #106)
 # Subpath under the hive (no hive prefix), e.g. SOFTWARE\Contoso\Apps
 # Normalization mirrors normalizeMarkerPath in lib/registry-marker.ts - keep in sync
@@ -1051,6 +1064,24 @@ if ($verifyInstall) {
     )
 }
 
+# Additional post-install commands (issue #118) - run after the app installs and is
+# verified, before the detection marker is written. A failure throws and routes to the
+# error exit so the marker is skipped and the deployment is retried.
+if ($postInstallCommands.Count -gt 0) {
+    Write-Host "Adding $($postInstallCommands.Count) custom post-install command(s) from PSADT config"
+    $lines += @(
+        ''
+        '    ## Custom post-install commands (user-specified)'
+    )
+    foreach ($postCmd in $postInstallCommands) {
+        $postCmdEscaped = $postCmd -replace "'", "''"
+        $lines += @(
+            "    Write-ADTLogEntry -Message 'Executing post-install command: $postCmdEscaped' -Severity 'Info' -Source 'Install-ADTDeployment'"
+            "    Start-ADTProcess -FilePath `"`$env:SystemRoot\System32\cmd.exe`" -ArgumentList '/c $postCmdEscaped' -WorkingDirectory `$adtSession.DirFiles -WindowStyle Hidden"
+        )
+    }
+}
+
 # Write registry marker - scope-aware
 if ($IsUserScope) {
     # User-scope: Write to all user hives via Invoke-ADTAllUsersRegistryAction (handles SYSTEM context)
@@ -1236,6 +1267,23 @@ if (-not [string]::IsNullOrWhiteSpace($customUninstallCommand)) {
         '        Start-ADTProcess -FilePath $uninstallExe -ArgumentList $uninstallArgs -WindowStyle Hidden -WaitForMsiExec -Timeout (New-TimeSpan -Minutes 15) -TimeoutAction Stop -SuccessExitCodes @(0, 1605, 1614, 3010, 1641)'
         '    }'
     )
+}
+
+# Additional post-uninstall commands (issue #118) - run after the app is uninstalled,
+# before the detection marker is removed.
+if ($postUninstallCommands.Count -gt 0) {
+    Write-Host "Adding $($postUninstallCommands.Count) custom post-uninstall command(s) from PSADT config"
+    $lines += @(
+        ''
+        '    ## Custom post-uninstall commands (user-specified)'
+    )
+    foreach ($postCmd in $postUninstallCommands) {
+        $postCmdEscaped = $postCmd -replace "'", "''"
+        $lines += @(
+            "    Write-ADTLogEntry -Message 'Executing post-uninstall command: $postCmdEscaped' -Severity 'Info' -Source 'Uninstall-ADTDeployment'"
+            "    Start-ADTProcess -FilePath `"`$env:SystemRoot\System32\cmd.exe`" -ArgumentList '/c $postCmdEscaped' -WorkingDirectory `$adtSession.DirFiles -WindowStyle Hidden"
+        )
+    }
 }
 
 # Add registry marker removal - scope-aware cleanup

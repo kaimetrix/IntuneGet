@@ -193,6 +193,12 @@ export interface PSADTConfig {
   // Install commands (can override defaults)
   installCommand?: string;
   uninstallCommand?: string;
+
+  // Additional commands run as extra PSADT steps after the main install /
+  // uninstall (e.g. delete a desktop shortcut after installing). Each entry is a
+  // full command line executed via cmd.exe /c, in order. Empty/absent = none.
+  postInstallCommands?: string[];
+  postUninstallCommands?: string[];
 }
 
 /**
