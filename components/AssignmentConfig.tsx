@@ -38,6 +38,7 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
   const [availableFilters, setAvailableFilters] = useState<IntuneAssignmentFilter[]>([]);
   const [isLoadingFilters, setIsLoadingFilters] = useState(false);
   const [filtersLoaded, setFiltersLoaded] = useState(false);
+  const [filtersError, setFiltersError] = useState<string | null>(null);
   const [expandedFilterRow, setExpandedFilterRow] = useState<number | null>(null);
 
   const { getAccessToken } = useMicrosoftAuth();
@@ -61,6 +62,7 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
     if (filtersLoaded || isLoadingFilters) return;
 
     setIsLoadingFilters(true);
+    setFiltersError(null);
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) return;
@@ -75,12 +77,22 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
       if (response.ok) {
         const data = await response.json();
         setAvailableFilters(data.filters || []);
+        // Only mark as loaded on success, so a failure (e.g. missing permission
+        // that the admin then fixes) can be retried by reopening the panel.
+        setFiltersLoaded(true);
+      } else {
+        // Surface the real reason (e.g. missing permission) instead of letting
+        // an error masquerade as an empty filter list.
+        const data = await response.json().catch(() => ({}));
+        setFiltersError(
+          data.error || `Failed to load assignment filters (${response.status})`
+        );
       }
     } catch (err) {
       console.error('Failed to load assignment filters:', err);
+      setFiltersError('Failed to load assignment filters. Please try again.');
     } finally {
       setIsLoadingFilters(false);
-      setFiltersLoaded(true);
     }
   }, [filtersLoaded, isLoadingFilters, getAccessToken, isMspUser, selectedTenantId]);
 
@@ -232,6 +244,26 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
   const updateFilterType = (index: number, filterType: 'include' | 'exclude') => {
     const updated = [...assignments];
     updated[index] = { ...updated[index], filterType };
+    onChange(updated);
+  };
+
+  // Update end-user notification behavior
+  const updateNotifications = (
+    index: number,
+    notifications: 'showAll' | 'showReboot' | 'hideAll'
+  ) => {
+    const updated = [...assignments];
+    updated[index] = { ...updated[index], notifications };
+    onChange(updated);
+  };
+
+  // Update delivery optimization priority
+  const updateDeliveryOptimizationPriority = (
+    index: number,
+    deliveryOptimizationPriority: 'notConfigured' | 'foreground'
+  ) => {
+    const updated = [...assignments];
+    updated[index] = { ...updated[index], deliveryOptimizationPriority };
     onChange(updated);
   };
 
@@ -575,7 +607,13 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
                               ? 'text-purple-400 hover:text-purple-300'
                               : 'text-text-muted hover:text-text-primary'
                           )}
-                          title={assignment.filterId ? `Filter: ${assignment.filterName}` : 'Add filter'}
+                          title={
+                            assignment.filterId
+                              ? `Filter: ${assignment.filterName}`
+                              : isExclusion
+                              ? 'Add filter'
+                              : 'Assignment settings (filter, notifications, priority)'
+                          }
                         >
                           <SlidersHorizontal className="w-4 h-4" />
                         </button>
@@ -615,20 +653,26 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
                         </div>
                       )}
 
-                      {/* Expanded filter picker */}
+                      {/* Expanded settings panel: filter + (for non-exclusion) notifications and DO priority */}
                       {expandedFilterRow === index && (
-                        <div className="px-3 pb-3 border-t border-overlay/10 pt-2">
-                          {isLoadingFilters ? (
-                            <div className="flex items-center gap-2 text-text-muted text-xs py-2">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              Loading filters...
-                            </div>
-                          ) : availableFilters.length === 0 ? (
-                            <p className="text-text-muted text-xs py-2">
-                              No assignment filters available in this tenant.
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
+                        <div className="px-3 pb-3 border-t border-overlay/10 pt-2 space-y-3">
+                          {/* Assignment filter */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-medium text-text-secondary">
+                              Assignment filter
+                            </label>
+                            {isLoadingFilters ? (
+                              <div className="flex items-center gap-2 text-text-muted text-xs py-1">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Loading filters...
+                              </div>
+                            ) : filtersError ? (
+                              <p className="text-amber-400 text-xs py-1">{filtersError}</p>
+                            ) : availableFilters.length === 0 ? (
+                              <p className="text-text-muted text-xs py-1">
+                                No assignment filters available in this tenant.
+                              </p>
+                            ) : (
                               <div className="flex items-center gap-2">
                                 <select
                                   value={assignment.filterId || ''}
@@ -662,7 +706,52 @@ export function AssignmentConfig({ assignments, onChange }: AssignmentConfigProp
                                   </select>
                                 )}
                               </div>
-                            </div>
+                            )}
+                          </div>
+
+                          {/* End-user notifications + delivery optimization priority
+                              (Win32 assignment settings; not applicable to exclusions) */}
+                          {!isExclusion && (
+                            <>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-medium text-text-secondary">
+                                  End user notifications
+                                </label>
+                                <select
+                                  value={assignment.notifications || 'showAll'}
+                                  onChange={(e) =>
+                                    updateNotifications(
+                                      index,
+                                      e.target.value as 'showAll' | 'showReboot' | 'hideAll'
+                                    )
+                                  }
+                                  className="w-full text-xs bg-bg-elevated border border-overlay/15 rounded-lg px-3 py-2 text-text-primary focus:outline-none"
+                                >
+                                  <option value="showAll">Show all toast notifications</option>
+                                  <option value="showReboot">Show toast notifications for restarts only</option>
+                                  <option value="hideAll">Hide all toast notifications</option>
+                                </select>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-medium text-text-secondary">
+                                  Delivery optimization priority
+                                </label>
+                                <select
+                                  value={assignment.deliveryOptimizationPriority || 'notConfigured'}
+                                  onChange={(e) =>
+                                    updateDeliveryOptimizationPriority(
+                                      index,
+                                      e.target.value as 'notConfigured' | 'foreground'
+                                    )
+                                  }
+                                  className="w-full text-xs bg-bg-elevated border border-overlay/15 rounded-lg px-3 py-2 text-text-primary focus:outline-none"
+                                >
+                                  <option value="notConfigured">Content download in background</option>
+                                  <option value="foreground">Content download in foreground</option>
+                                </select>
+                              </div>
+                            </>
                           )}
                         </div>
                       )}

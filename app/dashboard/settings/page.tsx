@@ -52,6 +52,7 @@ interface PermissionStatusState {
     groupRead: boolean | null;
     deviceManagementManagedDevices: boolean | null;
     deviceManagementServiceConfig: boolean | null;
+    deviceManagementConfiguration: boolean | null;
   };
 }
 
@@ -152,6 +153,7 @@ export default function SettingsPage() {
             groupRead: null,
             deviceManagementManagedDevices: null,
             deviceManagementServiceConfig: null,
+            deviceManagementConfiguration: null,
           },
         });
         return;
@@ -191,6 +193,7 @@ export default function SettingsPage() {
           groupRead: result.permissions?.groupRead ?? null,
           deviceManagementManagedDevices: result.permissions?.deviceManagementManagedDevices ?? null,
           deviceManagementServiceConfig: result.permissions?.deviceManagementServiceConfig ?? null,
+          deviceManagementConfiguration: result.permissions?.deviceManagementConfiguration ?? null,
         },
       });
     } catch (error) {
@@ -205,6 +208,7 @@ export default function SettingsPage() {
           groupRead: null,
           deviceManagementManagedDevices: null,
           deviceManagementServiceConfig: null,
+          deviceManagementConfiguration: null,
         },
       });
     } finally {
@@ -627,6 +631,12 @@ export default function SettingsPage() {
                         name="DeviceManagementServiceConfig.ReadWrite.All"
                         description={<T>Read and write enrollment configurations (ESP profiles)</T>}
                         granted={permissionStatus?.permissions.deviceManagementServiceConfig ?? null}
+                        checking={isChecking}
+                      />
+                      <PermissionItem
+                        name="DeviceManagementConfiguration.Read.All"
+                        description={<T>Read assignment filters for app assignments</T>}
+                        granted={permissionStatus?.permissions.deviceManagementConfiguration ?? null}
                         checking={isChecking}
                       />
                     </div>

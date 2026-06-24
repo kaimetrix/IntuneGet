@@ -34,7 +34,7 @@ const tokenInflight = new Map<string, Promise<string | null>>();
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  maxRetries = 3
+  maxRetries = 5
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, options);
@@ -247,9 +247,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch unmanaged apps with pagination
+    // Fetch unmanaged apps with pagination.
+    // Note: no $orderby — server-side sorting of the full detectedApps collection
+    // is expensive and a frequent throttling (429) trigger. We re-sort by device
+    // count in code after consolidation instead.
     const graphApps: GraphUnmanagedApp[] = [];
-    let nextUrl: string | null = `${GRAPH_API_BASE}/deviceManagement/detectedApps?$top=100&$orderby=deviceCount desc`;
+    let nextUrl: string | null = `${GRAPH_API_BASE}/deviceManagement/detectedApps?$top=100`;
 
     while (nextUrl) {
       const graphResponse: Response = await fetchWithRetry(nextUrl, {
@@ -292,8 +295,11 @@ export async function GET(request: NextRequest) {
           return staleResponse;
         }
 
+        const errorMessage = graphResponse.status === 429
+          ? 'Microsoft Graph is throttling requests for this tenant (429). This can happen on large tenants or right after several syncs. Please wait a minute and try again.'
+          : `Failed to fetch apps from Intune (${graphResponse.status})`;
         return NextResponse.json(
-          { error: `Failed to fetch apps from Intune (${graphResponse.status})` },
+          { error: errorMessage },
           { status: graphResponse.status }
         );
       }
@@ -339,7 +345,12 @@ export async function GET(request: NextRequest) {
         }
       }
     }
-    const consolidatedApps = [...appGroups.values()];
+    // Sort by consolidated device count (descending). Done in code since the
+    // Graph query no longer uses $orderby (avoids throttling); this also orders
+    // by the true per-app total rather than any single version's count.
+    const consolidatedApps = [...appGroups.values()].sort(
+      (a, b) => b.deviceCount - a.deviceCount
+    );
 
     // Re-key the merged ids by the consolidated winner's id so the cache write
     // can attach the full version list to each app (fallback handled on read).

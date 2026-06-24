@@ -498,7 +498,13 @@ export async function getAssignmentFilters(
   });
 
   if (!response.ok) {
-    throw new Error('Failed to get Intune assignment filters');
+    // Carry the HTTP status so callers can distinguish a permission error (403)
+    // from a genuinely empty filter list and surface an actionable message.
+    const err = new Error(
+      `Failed to get Intune assignment filters (${response.status})`
+    ) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
   }
 
   const data: GraphApiResponse<IntuneAssignmentFilter> = await response.json();
@@ -623,8 +629,8 @@ export function convertToGraphAssignments(
     if (assignment.type !== 'exclusionGroup') {
       graphAssignment.settings = {
         '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings',
-        notifications: 'showAll',
-        deliveryOptimizationPriority: 'notConfigured',
+        notifications: assignment.notifications ?? 'showAll',
+        deliveryOptimizationPriority: assignment.deliveryOptimizationPriority ?? 'notConfigured',
       };
     }
 

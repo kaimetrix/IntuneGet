@@ -251,8 +251,9 @@ export function AdminConsentBanner({ onConsentGranted }: AdminConsentBannerProps
             <p className="text-sm text-text-secondary mb-2">
               Admin consent was granted, but required Intune permissions are missing.
               The app needs <code className="text-amber-600 text-xs">DeviceManagementApps.ReadWrite.All</code>,
-              <code className="text-amber-600 text-xs ml-1">DeviceManagementManagedDevices.Read.All</code>, and
-              <code className="text-amber-600 text-xs ml-1">DeviceManagementServiceConfig.ReadWrite.All</code> (for ESP profiles).
+              <code className="text-amber-600 text-xs ml-1">DeviceManagementManagedDevices.Read.All</code>,
+              <code className="text-amber-600 text-xs ml-1">DeviceManagementServiceConfig.ReadWrite.All</code> (for ESP profiles), and
+              <code className="text-amber-600 text-xs ml-1">DeviceManagementConfiguration.Read.All</code> (for assignment filters).
               This can happen if permissions were updated after initial consent.
             </p>
             <p className="text-sm text-text-secondary mb-4">

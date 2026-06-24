@@ -63,10 +63,27 @@ export async function GET(request: NextRequest) {
       filters,
       count: filters.length,
     });
-  } catch {
+  } catch (error) {
+    // Reading assignment filters requires DeviceManagementConfiguration.Read.All,
+    // which is separate from the other Intune permissions IntuneGet uses. A 403
+    // here almost always means that scope was never consented, so surface an
+    // actionable message instead of a generic failure (which the UI would
+    // otherwise render as "no filters available").
+    const status = (error as { status?: number })?.status;
+    if (status === 403) {
+      return NextResponse.json(
+        {
+          error:
+            'Missing required permission: DeviceManagementConfiguration.Read.All. Add this permission to the IntuneGet app registration and grant admin consent to load assignment filters.',
+          permissionRequired: 'DeviceManagementConfiguration.Read.All',
+        },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
       { error: 'Failed to fetch Intune assignment filters' },
-      { status: 500 }
+      { status: status && status >= 400 ? status : 500 }
     );
   }
 }

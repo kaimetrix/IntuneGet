@@ -24,6 +24,7 @@ This document explains how IntuneGet authenticates users and performs Intune ope
   - `DeviceManagementApps.ReadWrite.All`
   - `DeviceManagementManagedDevices.Read.All` (for unmanaged apps)
   - `DeviceManagementServiceConfig.ReadWrite.All` (for ESP profile support)
+  - `DeviceManagementConfiguration.Read.All` (for assignment filters)
 - Purpose: create/update Intune Win32 apps and related metadata.
 
 ## 3. Admin Consent Model

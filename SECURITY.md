@@ -70,7 +70,7 @@ When self-hosting IntuneGet:
 
 ## Known Limitations
 
-- The service principal requires DeviceManagementApps.ReadWrite.All and DeviceManagementServiceConfig.ReadWrite.All (broad permissions)
+- The service principal requires DeviceManagementApps.ReadWrite.All, DeviceManagementServiceConfig.ReadWrite.All, and DeviceManagementConfiguration.Read.All (broad permissions)
 - GitHub Actions runners have temporary access to download URLs
 - Installer files are temporarily stored on runners during packaging
 

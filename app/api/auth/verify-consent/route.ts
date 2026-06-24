@@ -35,6 +35,7 @@ interface PermissionStatus {
   groupRead: boolean | null;
   deviceManagementManagedDevices: boolean | null;
   deviceManagementServiceConfig: boolean | null;
+  deviceManagementConfiguration: boolean | null;
 }
 
 interface ConsentVerificationResult {
@@ -105,6 +106,7 @@ async function verifyConsentWithGraph(tenantId: string, justConsented = false): 
         groupRead: tokenRoles.includes('GroupMember.Read.All'),
         deviceManagementManagedDevices: tokenRoles.includes('DeviceManagementManagedDevices.Read.All'),
         deviceManagementServiceConfig: tokenRoles.includes('DeviceManagementServiceConfig.ReadWrite.All'),
+        deviceManagementConfiguration: tokenRoles.includes('DeviceManagementConfiguration.Read.All'),
       };
 
       // If consent was just granted, Microsoft can take minutes to propagate
@@ -138,6 +140,7 @@ async function verifyConsentWithGraph(tenantId: string, justConsented = false): 
     groupRead: tokenRoles.includes('GroupMember.Read.All') || null,
     deviceManagementManagedDevices: tokenRoles.includes('DeviceManagementManagedDevices.Read.All') || null,
     deviceManagementServiceConfig: tokenRoles.includes('DeviceManagementServiceConfig.ReadWrite.All') || null,
+    deviceManagementConfiguration: tokenRoles.includes('DeviceManagementConfiguration.Read.All') || null,
   };
 
   // Test DeviceManagementApps.ReadWrite.All permission
@@ -236,6 +239,40 @@ async function verifyConsentWithGraph(tenantId: string, justConsented = false): 
     );
   } catch {
     permissions.deviceManagementManagedDevices = null;
+  }
+
+  // Test DeviceManagementConfiguration.Read.All permission (assignment filters).
+  // Non-blocking: filters are optional, so this only informs the UI. A definitive
+  // live test avoids showing "unknown" when the scope was simply never consented.
+  try {
+    const filtersTestResponse = await fetch(
+      'https://graph.microsoft.com/beta/deviceManagement/assignmentFilters?$top=1&$select=id',
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (filtersTestResponse.status === 403) {
+      permissions.deviceManagementConfiguration = false;
+    } else if (filtersTestResponse.status >= 500) {
+      permissions.deviceManagementConfiguration = null;
+    } else {
+      permissions.deviceManagementConfiguration = true;
+    }
+
+    logApiPermissionTest(
+      '/api/auth/verify-consent',
+      tenantId,
+      'DeviceManagementConfiguration.Read.All',
+      filtersTestResponse.status,
+      permissions.deviceManagementConfiguration
+    );
+  } catch {
+    permissions.deviceManagementConfiguration = null;
   }
 
   const hasRequiredPermission = permissions.deviceManagementApps === true;

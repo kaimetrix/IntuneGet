@@ -135,7 +135,9 @@ async function applyStoreAssignments(
         target,
         settings: {
           '@odata.type': '#microsoft.graph.winGetAppAssignmentSettings',
-          notifications: 'showAll',
+          // winGetAppAssignmentSettings has no deliveryOptimizationPriority field,
+          // so only the notification preference carries over for Store apps.
+          notifications: assignment.notifications ?? 'showAll',
           installTimeSettings: null,
           restartSettings: null,
         },

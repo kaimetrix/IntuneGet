@@ -235,6 +235,12 @@ export default function AzureSetupPage() {
                 </code></T>
               </li>
               <li>
+                <T>Search and add:{" "}
+                <code className="text-accent-cyan">
+                  DeviceManagementConfiguration.Read.All
+                </code>{" "}(required to read assignment filters)</T>
+              </li>
+              <li>
                 <T>Click <strong>Add permissions</strong></T>
               </li>
             </ol>
@@ -275,6 +281,13 @@ export default function AzureSetupPage() {
                   </TableRow>
                   <TableRow>
                     <TableCell>DeviceManagementServiceConfig.ReadWrite.All</TableCell>
+                    <TableCell><T>Application</T></TableCell>
+                    <TableCell className="text-status-warning">
+                      <T>Requires admin consent</T>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>DeviceManagementConfiguration.Read.All</TableCell>
                     <TableCell><T>Application</T></TableCell>
                     <TableCell className="text-status-warning">
                       <T>Requires admin consent</T>

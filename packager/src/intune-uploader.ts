@@ -90,6 +90,8 @@ interface PackageAssignment {
   filterId?: string;
   filterName?: string;
   filterType?: 'include' | 'exclude';
+  notifications?: 'showAll' | 'showReboot' | 'hideAll';
+  deliveryOptimizationPriority?: 'notConfigured' | 'foreground';
 }
 
 interface IntuneAppCategorySelection {
@@ -114,10 +116,12 @@ interface GraphMobileAppAssignment {
   '@odata.type': '#microsoft.graph.mobileAppAssignment';
   intent: GraphAssignmentIntent;
   target: GraphAssignmentTarget;
-  settings: {
+  // Omitted for exclusion-group targets: Graph rejects assignment settings on
+  // exclusion assignments (it stores settings: null for them).
+  settings?: {
     '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings';
-    notifications: 'showAll';
-    deliveryOptimizationPriority: 'notConfigured';
+    notifications: 'showAll' | 'showReboot' | 'hideAll';
+    deliveryOptimizationPriority: 'notConfigured' | 'foreground';
   };
 }
 
@@ -934,6 +938,15 @@ export class IntuneUploader {
           filterType: assignment.filterType === 'include' || assignment.filterType === 'exclude'
             ? assignment.filterType
             : undefined,
+          notifications: assignment.notifications === 'showAll'
+            || assignment.notifications === 'showReboot'
+            || assignment.notifications === 'hideAll'
+            ? assignment.notifications
+            : undefined,
+          deliveryOptimizationPriority: assignment.deliveryOptimizationPriority === 'notConfigured'
+            || assignment.deliveryOptimizationPriority === 'foreground'
+            ? assignment.deliveryOptimizationPriority
+            : undefined,
         }));
     }
 
@@ -1037,16 +1050,15 @@ export class IntuneUploader {
         '@odata.type': '#microsoft.graph.mobileAppAssignment',
         intent: graphIntent,
         target,
-        settings: {
-          '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings',
-          notifications: 'showAll',
-          deliveryOptimizationPriority: 'notConfigured',
-        },
       };
 
-      // Exclusion assignments do not support settings
-      if (assignment.type === 'exclusionGroup') {
-        delete (graphAssignment as Partial<GraphMobileAppAssignment>).settings;
+      // Exclusion assignments do not support settings (Graph rejects them).
+      if (assignment.type !== 'exclusionGroup') {
+        graphAssignment.settings = {
+          '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings',
+          notifications: assignment.notifications ?? 'showAll',
+          deliveryOptimizationPriority: assignment.deliveryOptimizationPriority ?? 'notConfigured',
+        };
       }
 
       graphAssignments.push(graphAssignment);
@@ -1094,16 +1106,23 @@ export class IntuneUploader {
           (assignment.target.deviceAndAppManagementAssignmentFilterType as 'include' | 'exclude') || 'include';
       }
 
-      mapped.push({
+      const mappedAssignment: GraphMobileAppAssignment = {
         '@odata.type': '#microsoft.graph.mobileAppAssignment',
         intent,
         target,
-        settings: {
+      };
+
+      // Exclusion assignments do not support settings (Graph rejects them and
+      // stores settings: null), so only attach settings to non-exclusion targets.
+      if (targetType !== '#microsoft.graph.exclusionGroupAssignmentTarget') {
+        mappedAssignment.settings = {
           '@odata.type': '#microsoft.graph.win32LobAppAssignmentSettings',
           notifications: 'showAll',
           deliveryOptimizationPriority: 'notConfigured',
-        },
-      });
+        };
+      }
+
+      mapped.push(mappedAssignment);
     }
 
     return mapped;

@@ -104,6 +104,10 @@ export interface PackageAssignment {
   filterId?: string;       // Intune assignment filter ID
   filterName?: string;     // Display name for UI
   filterType?: 'include' | 'exclude';  // Filter mode
+  // Advanced Win32/Store assignment settings (not applicable to exclusion groups).
+  // Omitted = Intune defaults (showAll / notConfigured).
+  notifications?: 'showAll' | 'showReboot' | 'hideAll';  // End-user notifications
+  deliveryOptimizationPriority?: 'notConfigured' | 'foreground';  // DO download priority (Win32 only)
 }
 
 export interface IntuneAppCategorySelection {
