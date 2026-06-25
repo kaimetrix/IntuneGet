@@ -18,6 +18,42 @@ import type {
 import type { Json } from '@/types/database';
 
 /**
+ * PowerShell's ConvertTo-Json serializes a single-element array as a bare
+ * object and an empty array as null. SCCM JSON exports therefore arrive with
+ * fields like deploymentTypes or detectionClauses that may be an object or null
+ * instead of an array. Downstream matching iterates these with the spread and
+ * for...of operators, which throw on a non-iterable and surface as an HTTP 500
+ * on Run Matching. Coerce every such field back to an array at import time so
+ * the stored sccm_app_data is always well-shaped, including for exports that
+ * were generated before the export script was fixed.
+ */
+function toArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value === null || value === undefined) return [];
+  return [value as T];
+}
+
+function normalizeSccmApplication(app: SccmApplication): SccmApplication {
+  const deploymentTypes = toArray<SccmApplication['deploymentTypes'][number]>(
+    app.deploymentTypes
+  ).map(dt => ({
+    ...dt,
+    detectionClauses: toArray<SccmApplication['deploymentTypes'][number]['detectionClauses'][number]>(
+      dt?.detectionClauses
+    ),
+    requirementsRules: toArray<NonNullable<SccmApplication['deploymentTypes'][number]['requirementsRules']>[number]>(
+      dt?.requirementsRules
+    ),
+  }));
+
+  return {
+    ...app,
+    deploymentTypes,
+    adminCategories: toArray<string>(app.adminCategories),
+  };
+}
+
+/**
  * Parse CSV content to array of rows
  */
 function parseCsv(content: string): SccmCsvRow[] {
@@ -172,9 +208,14 @@ function parseJsonImport(content: string): SccmImportFormat | null {
   try {
     const parsed = JSON.parse(content);
 
-    // Check if it's our expected format
-    if (parsed.version && parsed.applications && Array.isArray(parsed.applications)) {
-      return parsed as SccmImportFormat;
+    // Check if it's our expected format. applications may be a single object
+    // (not an array) when the export contained exactly one app, due to the
+    // ConvertTo-Json single-element quirk, so coerce it.
+    if (parsed.version && parsed.applications) {
+      return {
+        ...parsed,
+        applications: toArray<SccmApplication>(parsed.applications),
+      } as SccmImportFormat;
     }
 
     // Check if it's a raw array of applications
@@ -277,7 +318,7 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      applications = parsed.applications;
+      applications = parsed.applications.map(normalizeSccmApplication);
 
       // Validate required fields
       applications = applications.filter((app, i) => {

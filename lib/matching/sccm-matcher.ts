@@ -80,8 +80,10 @@ export function normalizeSccmAppName(name: string): string {
  * Extract MSI product code from SCCM detection clauses
  */
 export function extractProductCode(app: SccmApplication): string | null {
-  for (const dt of app.deploymentTypes) {
-    for (const clause of dt.detectionClauses) {
+  // deploymentTypes / detectionClauses can arrive as a non-array from quirky
+  // JSON exports; guard so matching never throws on a bad shape.
+  for (const dt of Array.isArray(app.deploymentTypes) ? app.deploymentTypes : []) {
+    for (const clause of Array.isArray(dt?.detectionClauses) ? dt.detectionClauses : []) {
       if (clause.type === 'MSI') {
         const msiClause = clause as SccmMsiDetectionClause;
         if (msiClause.productCode) {
@@ -104,8 +106,11 @@ export function isSupportedTechnology(technology: SccmDeploymentTechnology): boo
  * Get the primary deployment type for an SCCM app
  */
 export function getPrimaryDeploymentType(app: SccmApplication) {
+  // deploymentTypes can arrive as a non-array (single object) or null from
+  // quirky JSON exports; guard against a non-iterable before spreading.
+  const deploymentTypes = Array.isArray(app.deploymentTypes) ? app.deploymentTypes : [];
   // Sort by priority (lower is better) and return first
-  const sorted = [...app.deploymentTypes].sort((a, b) =>
+  const sorted = [...deploymentTypes].sort((a, b) =>
     (a.priority ?? 999) - (b.priority ?? 999)
   );
   return sorted[0] || null;
