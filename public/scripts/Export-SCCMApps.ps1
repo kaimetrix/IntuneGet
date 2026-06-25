@@ -378,9 +378,11 @@ foreach ($app in $apps) {
             $categories = @($fullApp.LocalizedCategoryInstanceNames)
         }
 
-        # Get deployment types
+        # Get deployment types.
+        # Get-CMDeploymentType has no -ApplicationId parameter; pass the
+        # application object via -InputObject (alias Application) instead.
         $deploymentTypes = @()
-        $dtList = Get-CMDeploymentType -ApplicationId $app.CI_ID
+        $dtList = Get-CMDeploymentType -InputObject $fullApp
 
         foreach ($dt in $dtList) {
             $dtDetails = Get-DeploymentTypeDetails -DeploymentType $dt
@@ -390,7 +392,9 @@ foreach ($app in $apps) {
         # Get deployment count
         $deploymentCount = 0
         try {
-            $deployments = Get-CMApplicationDeployment -ApplicationId $app.CI_ID -ErrorAction SilentlyContinue
+            # Get-CMApplicationDeployment has no -ApplicationId parameter; pass
+            # the application object via -InputObject (alias Application).
+            $deployments = Get-CMApplicationDeployment -InputObject $fullApp -ErrorAction SilentlyContinue
             if ($deployments) {
                 $deploymentCount = @($deployments).Count
             }
