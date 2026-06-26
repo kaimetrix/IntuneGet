@@ -170,18 +170,15 @@ export const sqliteDb: DatabaseAdapter = {
      */
     async getByUserId(userId: string, limit: number = 50): Promise<PackagingJob[]> {
       const database = getDb();
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      // Return the most recent jobs for the user with no age cutoff, so the
+      // Uploads (all activities) view shows older completed deployments too.
       const stmt = database.prepare(`
         SELECT * FROM packaging_jobs
         WHERE user_id = ?
-        AND (
-          status IN ('queued', 'packaging', 'uploading')
-          OR created_at >= ?
-        )
         ORDER BY created_at DESC
         LIMIT ?
       `);
-      const rows = stmt.all(userId, sevenDaysAgo, limit) as Record<string, unknown>[];
+      const rows = stmt.all(userId, limit) as Record<string, unknown>[];
       return rows.map(parseJobRow);
     },
 

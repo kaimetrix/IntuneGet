@@ -129,7 +129,10 @@ export default function UploadsPage() {
     }
 
     try {
-      const response = await fetch(`/api/package?userId=${user.id}`);
+      const accessToken = await getAccessToken();
+      const response = await fetch('/api/package', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
       if (!response.ok) {
         const contentType = response.headers.get('content-type');
@@ -150,7 +153,7 @@ export default function UploadsPage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [user?.id]);
+  }, [user?.id, getAccessToken]);
 
   // Initial load
   useEffect(() => {

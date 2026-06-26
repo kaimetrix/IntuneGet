@@ -97,6 +97,13 @@ function minutesAgo(minutes: number): string {
 describe('GET /api/package (userId listing)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The list path now authenticates and uses the token's userId.
+    parseAccessTokenMock.mockResolvedValue({
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      userEmail: 'user@example.com',
+      userName: 'User One',
+    });
     getDatabaseMock.mockReturnValue({
       jobs: {
         getByUserId: getByUserIdMock,

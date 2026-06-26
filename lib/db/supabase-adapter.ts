@@ -154,16 +154,13 @@ export const supabaseDb: DatabaseAdapter = {
      */
     async getByUserId(userId: string, limit: number = 50): Promise<PackagingJob[]> {
       const supabase = createServerClient();
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const terminalStatuses = ['completed', 'deployed', 'failed', 'cancelled', 'duplicate_skipped'];
-      const activeStatuses = ['queued', 'packaging', 'uploading'];
 
-      // Fetch jobs: either active (any age) or terminal within last 7 days
+      // Return the most recent jobs for the user with no age cutoff, so the
+      // Uploads (all activities) view shows older completed deployments too.
       const { data, error } = await supabase
         .from('packaging_jobs')
         .select('*')
         .eq('user_id', userId)
-        .or(`status.in.(${activeStatuses.join(',')}),created_at.gte.${sevenDaysAgo}`)
         .order('created_at', { ascending: false })
         .limit(limit);
 

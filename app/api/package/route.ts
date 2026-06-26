@@ -599,14 +599,6 @@ async function healStaleJobs(
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get('jobId');
-  const userId = searchParams.get('userId');
-
-  if (!jobId && !userId) {
-    return NextResponse.json(
-      { error: 'jobId or userId parameter required' },
-      { status: 400 }
-    );
-  }
 
   const db = getDatabase();
 
@@ -624,8 +616,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ job });
     }
 
-    // Get all jobs for a user
-    const jobs = await db.jobs.getByUserId(userId!, 50);
+    // List the signed-in user's jobs. Use the token's userId (the same value
+    // jobs are stored under and the dashboard reads) instead of trusting a
+    // client-supplied id, so older completed activity shows here too.
+    const user = await parseAccessToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const jobs = await db.jobs.getByUserId(user.userId, 50);
 
     // Self-heal jobs stuck in intermediate states (safety net for
     // deployments where the cleanup cron is not running)
