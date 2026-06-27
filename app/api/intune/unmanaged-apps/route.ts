@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient, isSupabaseConfigured } from '@/lib/supabase';
 import { resolveTargetTenantId } from '@/lib/msp/tenant-resolution';
 import { parseAccessToken } from '@/lib/auth-utils';
 import { matchDiscoveredApp, filterUserApps, isSystemApp, normalizeAppName } from '@/lib/matching/app-matcher';
@@ -193,66 +193,75 @@ export async function GET(request: NextRequest) {
     const forceRefresh = searchParams.get('refresh') === 'true';
     const includeSystem = searchParams.get('includeSystem') === 'true';
 
-    const supabase = createServerClient();
-    const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
+    const supabase = isSupabaseConfigured() ? createServerClient() : null;
+    let tenantId: string;
 
-    const tenantResolution = await resolveTargetTenantId({
-      supabase,
-      userId: user.userId,
-      tokenTenantId: user.tenantId,
-      requestedTenantId: mspTenantId,
-    });
+    if (supabase) {
+      const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
 
-    if (tenantResolution.errorResponse) {
-      return tenantResolution.errorResponse;
-    }
+      const tenantResolution = await resolveTargetTenantId({
+        supabase,
+        userId: user.userId,
+        tokenTenantId: user.tenantId,
+        requestedTenantId: mspTenantId,
+      });
 
-    const tenantId = tenantResolution.tenantId;
-    staleFallbackContext = { supabase, tenantId, includeSystem };
+      if (tenantResolution.errorResponse) {
+        return tenantResolution.errorResponse;
+      }
 
-    // Verify admin consent
-    const { data: consentData, error: consentError } = await supabase
-      .from('tenant_consent')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .single();
+      tenantId = tenantResolution.tenantId;
+      staleFallbackContext = { supabase, tenantId, includeSystem };
 
-    if (consentError || !consentData) {
-      return NextResponse.json(
-        { error: 'Admin consent not found. Please complete the admin consent flow.' },
-        { status: 403 }
-      );
-    }
-
-    // Check cache first (unless force refresh). Serve any cached data we have -
-    // fresh when within the TTL, otherwise the last sync marked stale - so
-    // opening the Discovered Apps tab returns immediately. A full Graph re-scan
-    // can run for minutes on large tenants, so we never block a normal page load
-    // on it; the user refreshes explicitly (forceRefresh) to pull the latest,
-    // and that path is time-bounded below. Only when there is no cached data at
-    // all do we fetch inline here.
-    if (!forceRefresh) {
-      const { data: cachedApps } = await supabase
-        .from('discovered_apps_cache')
+      // Verify admin consent
+      const { data: consentData, error: consentError } = await supabase
+        .from('tenant_consent')
         .select('*')
         .eq('tenant_id', tenantId)
-        .order('device_count', { ascending: false });
+        .eq('is_active', true)
+        .single();
 
-      if (cachedApps && cachedApps.length > 0) {
-        const lastSynced = new Date(cachedApps[0].last_synced).getTime();
-        const isCacheValid = Date.now() - lastSynced < CACHE_DURATION_MS;
-
-        return buildCachedAppsResponse(
-          supabase,
-          tenantId,
-          includeSystem,
-          cachedApps,
-          isCacheValid
-            ? undefined
-            : 'Showing the last synced results. Use Refresh to fetch the latest.'
+      if (consentError || !consentData) {
+        return NextResponse.json(
+          { error: 'Admin consent not found. Please complete the admin consent flow.' },
+          { status: 403 }
         );
       }
+
+      // Check cache first (unless force refresh). Serve any cached data we have -
+      // fresh when within the TTL, otherwise the last sync marked stale - so
+      // opening the Discovered Apps tab returns immediately. A full Graph re-scan
+      // can run for minutes on large tenants, so we never block a normal page load
+      // on it; the user refreshes explicitly (forceRefresh) to pull the latest,
+      // and that path is time-bounded below. Only when there is no cached data at
+      // all do we fetch inline here.
+      if (!forceRefresh) {
+        const { data: cachedApps } = await supabase
+          .from('discovered_apps_cache')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('device_count', { ascending: false });
+
+        if (cachedApps && cachedApps.length > 0) {
+          const lastSynced = new Date(cachedApps[0].last_synced).getTime();
+          const isCacheValid = Date.now() - lastSynced < CACHE_DURATION_MS;
+
+          return buildCachedAppsResponse(
+            supabase,
+            tenantId,
+            includeSystem,
+            cachedApps,
+            isCacheValid
+              ? undefined
+              : 'Showing the last synced results. Use Refresh to fetch the latest.'
+          );
+        }
+      }
+    } else {
+      // Self-hosted sqlite mode: single tenant from the access token. No consent
+      // cache (the service-principal token acquired next proves consent) and no
+      // discovered-apps cache, so this always runs a live, cache-less scan.
+      tenantId = user.tenantId;
     }
 
     // Fetch fresh data from Graph API
@@ -321,14 +330,16 @@ export async function GET(request: NextRequest) {
         const failureSummary = graphResponse.status === 429
           ? 'Intune API throttled (429)'
           : `Intune API request failed (${graphResponse.status})`;
-        const staleResponse = await tryStaleCacheFallback(
-          supabase,
-          tenantId,
-          includeSystem,
-          failureSummary
-        );
-        if (staleResponse) {
-          return staleResponse;
+        if (supabase) {
+          const staleResponse = await tryStaleCacheFallback(
+            supabase,
+            tenantId,
+            includeSystem,
+            failureSummary
+          );
+          if (staleResponse) {
+            return staleResponse;
+          }
         }
 
         const errorMessage = graphResponse.status === 429
@@ -368,7 +379,7 @@ export async function GET(request: NextRequest) {
     // cache over a slow partial scan. If there is no cache to fall back to, we
     // continue with the partial set below but do not persist or prune the cache,
     // so a later refresh can still seed it with a complete scan.
-    if (budgetExceeded) {
+    if (budgetExceeded && supabase) {
       const staleResponse = await tryStaleCacheFallback(
         supabase,
         tenantId,
@@ -430,25 +441,31 @@ export async function GET(request: NextRequest) {
     const now = new Date().toISOString();
     const unmanagedApps: UnmanagedApp[] = [];
 
-    // Get claimed apps
-    const { data: claimedApps } = await supabase
-      .from('claimed_apps')
-      .select('discovered_app_id, status')
-      .eq('tenant_id', tenantId);
+    // Get claimed apps + manual mappings. In sqlite mode there is no Supabase to
+    // query, so these stay empty: every app is unclaimed and auto-matched.
+    const claimedMap = new Map<string, string>();
+    const manualMappingMap = new Map<string, ManualMappingRow>();
 
-    const claimedMap = new Map(
-      claimedApps?.map(c => [c.discovered_app_id, c.status]) || []
-    );
+    if (supabase) {
+      const { data: claimedApps } = await supabase
+        .from('claimed_apps')
+        .select('discovered_app_id, status')
+        .eq('tenant_id', tenantId);
 
-    // Get manual mappings for this tenant
-    const { data: manualMappings } = await supabase
-      .from('manual_app_mappings')
-      .select('*')
-      .or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
+      for (const c of claimedApps || []) {
+        claimedMap.set(c.discovered_app_id, c.status);
+      }
 
-    const manualMappingMap = new Map(
-      manualMappings?.map(m => [m.discovered_app_name.toLowerCase(), m]) || []
-    );
+      // Get manual mappings for this tenant
+      const { data: manualMappings } = await supabase
+        .from('manual_app_mappings')
+        .select('*')
+        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
+
+      for (const m of manualMappings || []) {
+        manualMappingMap.set(m.discovered_app_name.toLowerCase(), m);
+      }
+    }
 
     // Process each app
     for (const app of filteredApps) {
@@ -515,7 +532,7 @@ export async function GET(request: NextRequest) {
     // exceeded with no prior cache to fall back to) must not be written as the
     // authoritative cache or used to prune rows, otherwise it would look like a
     // complete result on the next load.
-    if (!budgetExceeded) {
+    if (supabase && !budgetExceeded) {
       // Upsert new cache entries, then remove stale ones from previous syncs.
       // This avoids a delete-then-insert race where concurrent requests could
       // see an empty cache and both hit the Graph API.
@@ -588,7 +605,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createServerClient();
+    const supabase = isSupabaseConfigured() ? createServerClient() : null;
+
+    if (!supabase) {
+      // Self-hosted sqlite mode: no discovered_apps_cache to aggregate, so there
+      // are no stats to compute. Return a zeroed result.
+      const emptyStats: UnmanagedAppsStats = {
+        total: 0,
+        matched: 0,
+        partial: 0,
+        unmatched: 0,
+        claimed: 0,
+        totalDevices: 0,
+      };
+      return NextResponse.json(emptyStats);
+    }
+
     const mspTenantId = request.headers.get('X-MSP-Tenant-Id');
 
     const tenantResolution = await resolveTargetTenantId({
