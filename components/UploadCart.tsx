@@ -63,6 +63,7 @@ export function UploadCart() {
   const updateItem = useCartStore((state) => state.updateItem);
   const clearCart = useCartStore((state) => state.clearCart);
   const [isDeploying, setIsDeploying] = useState(false);
+  const [showLargeDeployConfirm, setShowLargeDeployConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<CartItem | null>(null);
   // winget id -> email of whoever already deployed it in this tenant, so we can
@@ -118,15 +119,18 @@ export function UploadCart() {
     };
   }, [isOpen, isAuthenticated, items.length, getAccessToken, isMspUser, selectedTenantId]);
 
-  // Escape key handler for sidebar
+  // Escape key handler for sidebar. Radix dialogs prevent default on Escape
+  // but the event still bubbles to document, so yield while a nested overlay
+  // (item config, large-deploy confirm) is open - Escape should dismiss that
+  // layer, not the whole cart.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || editingItem || showLargeDeployConfirm) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeCart();
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, closeCart]);
+  }, [isOpen, editingItem, showLargeDeployConfirm, closeCart]);
 
   const handleFixPermissions = () => {
     if (permissionError === 'network_error') {
@@ -205,6 +209,16 @@ export function UploadCart() {
 
   const handleClearAll = () => {
     clearCart();
+  };
+
+  // Large batches get an explicit review step; small carts stay one-click.
+  const LARGE_DEPLOY_THRESHOLD = 10;
+  const handleDeployClick = () => {
+    if (items.length >= LARGE_DEPLOY_THRESHOLD) {
+      setShowLargeDeployConfirm(true);
+    } else {
+      handleDeploy();
+    }
   };
 
   return (
@@ -447,7 +461,7 @@ export function UploadCart() {
                     </AlertDialogContent>
                   </AlertDialog>
                   <Button
-                    onClick={isAuthenticated && !canDeploy && permissionStatus !== 'checking' ? handleFixPermissions : handleDeploy}
+                    onClick={isAuthenticated && !canDeploy && permissionStatus !== 'checking' ? handleFixPermissions : handleDeployClick}
                     disabled={isDeploying || (isAuthenticated && permissionStatus === 'checking')}
                     className={`flex-1 text-white border-0 disabled:opacity-50 ${
                       isAuthenticated && !canDeploy && permissionStatus !== 'checking'
@@ -490,6 +504,31 @@ export function UploadCart() {
               onClose={() => setEditingItem(null)}
             />
           )}
+
+          {/* Large deployment confirmation */}
+          <AlertDialog open={showLargeDeployConfirm} onOpenChange={setShowLargeDeployConfirm}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Deploy {items.length} apps to Intune?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will queue {items.length} packaging jobs and create {items.length} apps
+                  in your Intune tenant. Review your selection before continuing.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Review Selection</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-accent-cyan hover:bg-accent-cyan-dim"
+                  onClick={() => {
+                    setShowLargeDeployConfirm(false);
+                    handleDeploy();
+                  }}
+                >
+                  Deploy All
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
     </>

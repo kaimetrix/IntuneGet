@@ -174,6 +174,7 @@ export default function DashboardLayout({
               <Button
                 variant="ghost"
                 onClick={toggleCart}
+                aria-label={cartItemCount > 0 ? `Deployment cart, ${cartItemCount} items` : 'Deployment cart'}
                 className="relative text-text-secondary hover:text-text-primary hover:bg-overlay/5 transition-all"
               >
                 <ShoppingCart className="w-5 h-5" />

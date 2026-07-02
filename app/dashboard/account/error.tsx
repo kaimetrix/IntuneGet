@@ -1,10 +1,10 @@
 'use client';
 
-import { Radar } from 'lucide-react';
+import { User } from 'lucide-react';
 import { T } from 'gt-next';
 import { DashboardRouteError } from '@/components/dashboard/DashboardRouteError';
 
-export default function UnmanagedAppsError({
+export default function AccountError({
   error,
   reset,
 }: {
@@ -15,10 +15,10 @@ export default function UnmanagedAppsError({
     <DashboardRouteError
       error={error}
       reset={reset}
-      title={<T>Unmanaged Apps</T>}
-      description={<T>Unmanaged apps detected across your devices</T>}
-      icon={Radar}
-      logLabel="Unmanaged Apps"
+      title={<T>Account</T>}
+      description={<T>Your profile, usage statistics, and session details</T>}
+      icon={User}
+      logLabel="Account"
     />
   );
 }

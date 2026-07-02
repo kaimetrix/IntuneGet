@@ -1,10 +1,10 @@
 'use client';
 
-import { Radar } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { T } from 'gt-next';
 import { DashboardRouteError } from '@/components/dashboard/DashboardRouteError';
 
-export default function UnmanagedAppsError({
+export default function MspError({
   error,
   reset,
 }: {
@@ -15,10 +15,10 @@ export default function UnmanagedAppsError({
     <DashboardRouteError
       error={error}
       reset={reset}
-      title={<T>Unmanaged Apps</T>}
-      description={<T>Unmanaged apps detected across your devices</T>}
-      icon={Radar}
-      logLabel="Unmanaged Apps"
+      title={<T>MSP Dashboard</T>}
+      description={<T>Manage deployments across your client tenants</T>}
+      icon={Building2}
+      logLabel="MSP"
     />
   );
 }

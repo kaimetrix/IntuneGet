@@ -42,7 +42,7 @@ import { useMspOptional } from '@/hooks/useMspOptional';
 import { ProgressStepper } from '@/components/ProgressStepper';
 import { ErrorDisplay } from '@/components/ErrorDisplay';
 import { EspProfileSelector } from '@/components/EspProfileSelector';
-import { PageHeader, AnimatedStatCard, StatCardGrid, AnimatedEmptyState, SkeletonGrid } from '@/components/dashboard';
+import { PageHeader, AnimatedStatCard, StatCardGrid, AnimatedEmptyState, SkeletonCard, SkeletonGrid } from '@/components/dashboard';
 import type { PackageAssignment } from '@/types/upload';
 
 interface PackagingJob {
@@ -102,7 +102,7 @@ function formatRelativeTime(dateStr: string): string {
 export default function UploadsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { user, getAccessToken } = useMicrosoftAuth();
+  const { user, getAccessToken, signIn } = useMicrosoftAuth();
   const { isMspUser, selectedTenantId } = useMspOptional();
   const prefersReducedMotion = useReducedMotion();
 
@@ -113,6 +113,7 @@ export default function UploadsPage() {
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [redeployingJobId, setRedeployingJobId] = useState<string | null>(null);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Get job IDs and status filter from URL params
   const highlightedJobIds = searchParams.get('jobs')?.split(',') || [];
@@ -136,6 +137,12 @@ export default function UploadsPage() {
 
     try {
       const accessToken = await getAccessToken();
+      if (!accessToken) {
+        // Silent refresh failed and interactive auth is required; stop polling
+        // and prompt for re-auth instead of sending an unauthenticated request.
+        setSessionExpired(true);
+        return;
+      }
       const url = viewScope === 'tenant' ? '/api/package?scope=tenant' : '/api/package';
       const response = await fetch(url, {
         headers: {
@@ -146,6 +153,11 @@ export default function UploadsPage() {
           ...(isMspUser && selectedTenantId ? { 'X-MSP-Tenant-Id': selectedTenantId } : {}),
         },
       });
+
+      if (response.status === 401) {
+        setSessionExpired(true);
+        return;
+      }
 
       if (!response.ok) {
         const contentType = response.headers.get('content-type');
@@ -159,6 +171,7 @@ export default function UploadsPage() {
       const data = await response.json();
       setJobs(data.jobs || []);
       setError(null);
+      setSessionExpired(false);
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch jobs');
@@ -179,14 +192,24 @@ export default function UploadsPage() {
       ['queued', 'packaging', 'uploading'].includes(job.status)
     );
 
-    if (!hasActiveJobs) return;
+    if (!hasActiveJobs || sessionExpired) return;
 
     const interval = setInterval(() => {
       fetchJobs();
     }, 2000); // Poll every 2 seconds for active jobs
 
     return () => clearInterval(interval);
-  }, [jobs, fetchJobs]);
+  }, [jobs, fetchJobs, sessionExpired]);
+
+  const handleSignInAgain = async () => {
+    try {
+      await signIn();
+      setSessionExpired(false);
+      fetchJobs(true);
+    } catch (err) {
+      console.error('Re-authentication failed:', err);
+    }
+  };
 
   const handleRefresh = () => {
     fetchJobs(true);
@@ -347,7 +370,7 @@ export default function UploadsPage() {
         <SkeletonGrid count={4} columns={4} variant="stat" />
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="glass-light rounded-xl p-5 border border-overlay/5 animate-pulse h-32" />
+            <SkeletonCard key={i} variant="list-item" showIcon className="h-32" />
           ))}
         </div>
       </div>
@@ -413,6 +436,33 @@ export default function UploadsPage() {
           </div>
         }
       />
+
+      {/* Session expired banner */}
+      <AnimatePresence>
+        {sessionExpired && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex items-start gap-3 p-4 bg-status-warning/10 border border-status-warning/20 rounded-lg"
+          >
+            <AlertTriangle className="w-5 h-5 text-status-warning flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-status-warning font-medium"><T>Your session has expired</T></p>
+              <p className="text-text-secondary text-sm mt-1">
+                <T>Job statuses are no longer updating. Sign in again to resume live updates.</T>
+              </p>
+            </div>
+            <Button
+              onClick={handleSignInAgain}
+              variant="outline"
+              className="border-status-warning/30 text-status-warning hover:bg-status-warning/10 flex-shrink-0"
+            >
+              <T>Sign In Again</T>
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Error message */}
       <AnimatePresence>
