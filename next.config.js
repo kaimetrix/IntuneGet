@@ -1,4 +1,11 @@
-import { withGTConfig } from "gt-next/config";
+const { withGTConfig } = require("gt-next/config");
+
+// Vercel can expose development-only translation credentials to every
+// environment. Never let those credentials reach a production Next.js build.
+if (process.env.NODE_ENV === "production") {
+  delete process.env.GT_DEV_API_KEY;
+  delete process.env.NEXT_PUBLIC_GT_DEV_API_KEY;
+}
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -36,4 +43,4 @@ const nextConfig = {
   },
 };
 
-export default withGTConfig(nextConfig);
+module.exports = withGTConfig(nextConfig);
