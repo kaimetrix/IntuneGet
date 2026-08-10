@@ -79,6 +79,21 @@ describe('PSADT registry uninstall identity contract', () => {
     expect(packager).toContain(
       'Start-ADTProcess -FilePath $bundledUninstaller -ArgumentList $registeredUninstallArguments -WorkingDirectory $adtSession.DirFiles'
     );
+    expect(packager).toContain(
+      "$selectedApplications.Count -eq 0 -and $originalInstallerType -eq ''burn''"
+    );
+    expect(packager).toContain(
+      '$bundleCandidates = @($changedApplications | Where-Object { -not $_.WindowsInstaller })'
+    );
+  });
+
+  it('verifies registry installers by their captured vendor identity', () => {
+    expect(packager).toContain(
+      '@(Get-ADTApplication -FilterScript { $_.PSChildName -eq $capturedUninstallKey } -ErrorAction SilentlyContinue)'
+    );
+    expect(packager).toContain(
+      'Post-install verification passed for captured vendor identity'
+    );
   });
 
   it('executes the exact vendor-documented command for Vivaldi silent removal', () => {

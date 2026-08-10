@@ -1272,6 +1272,12 @@ if ($useRegistryUninstall) {
         '        })'
         '        if ($bundleCandidates.Count -eq 1) { $selectedApplications = $bundleCandidates }'
         '    }'
+        '    if ($selectedApplications.Count -eq 0 -and $originalInstallerType -eq ''burn'') {'
+        '        # A Burn bootstrapper can register a bundle name that differs from the manifest display name.'
+        '        # Select it only when the install produced exactly one non-MSI entry; ambiguity still fails closed.'
+        '        $bundleCandidates = @($changedApplications | Where-Object { -not $_.WindowsInstaller })'
+        '        if ($bundleCandidates.Count -eq 1) { $selectedApplications = $bundleCandidates }'
+        '    }'
         '    if ($selectedApplications.Count -eq 0 -and $changedApplications.Count -eq 1) {'
         '        $selectedApplications = @($changedApplications[0])'
         '    }'
@@ -1288,15 +1294,29 @@ if ($useRegistryUninstall) {
 
 if ($verifyInstall) {
     Write-Host "Post-install verification enabled"
-    $lines += @(
-        ''
-        '    ## Verify the application actually installed before writing the detection marker'
-        "    `$verifyApps = Get-ADTApplication -Name '$displayNameSingleQuoteEscaped' -NameMatch 'Contains' -ErrorAction SilentlyContinue"
-        '    if (-not $verifyApps) {'
-        "        throw `"Post-install verification failed: '$displayNameSingleQuoteEscaped' was not found in the installed applications list. The installer exited without error but the application does not appear to be installed.`""
-        '    }'
-        "    Write-ADTLogEntry -Message `"Post-install verification passed`" -Source 'Install-ADTDeployment'"
-    )
+    if ($useRegistryUninstall) {
+        $lines += @(
+            ''
+            '    ## Verify the exact uninstall identity captured from this installation.'
+            '    $verifyApps = if ($capturedUninstallKey) {'
+            '        @(Get-ADTApplication -FilterScript { $_.PSChildName -eq $capturedUninstallKey } -ErrorAction SilentlyContinue)'
+            '    } else { @() }'
+            '    if ($verifyApps.Count -ne 1) {'
+            '        throw "Post-install verification failed: the captured vendor uninstall entry was not found."'
+            '    }'
+            "    Write-ADTLogEntry -Message `"Post-install verification passed for captured vendor identity`" -Source 'Install-ADTDeployment'"
+        )
+    } else {
+        $lines += @(
+            ''
+            '    ## Verify the application actually installed before writing the detection marker'
+            "    `$verifyApps = Get-ADTApplication -Name '$displayNameSingleQuoteEscaped' -NameMatch 'Contains' -ErrorAction SilentlyContinue"
+            '    if (-not $verifyApps) {'
+            "        throw `"Post-install verification failed: '$displayNameSingleQuoteEscaped' was not found in the installed applications list. The installer exited without error but the application does not appear to be installed.`""
+            '    }'
+            "    Write-ADTLogEntry -Message `"Post-install verification passed`" -Source 'Install-ADTDeployment'"
+        )
+    }
 }
 
 # Additional post-install commands (issue #118) - run after the app installs and is
