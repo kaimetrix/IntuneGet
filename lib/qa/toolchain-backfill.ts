@@ -16,6 +16,10 @@ const TOOLCHAIN_TERMINAL_RETRY_TARGETS: Readonly<Record<string, readonly string[
     'HP.ImageAssistant',
     'Microsoft.Office',
   ],
+  '42bf6e2af604a5e6bb44f2feff38e941ab2222c1': [
+    'Adobe.CreativeCloud',
+    'Elgato.StreamDeck',
+  ],
 };
 
 export function shouldRetryTerminalToolchainCandidate(
