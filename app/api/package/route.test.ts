@@ -378,6 +378,141 @@ describe('POST /api/package (workflow dispatch)', () => {
     });
   });
 
+  it('repairs empty catalog detection rules for both QA and customer packaging', async () => {
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [makeWin32Item({
+          wingetId: 'Anysphere.Cursor',
+          displayName: 'Cursor',
+          version: '3.14.27',
+          detectionRules: [],
+          psadtConfig: { ...DEFAULT_PSADT_CONFIG, detectionRules: [] },
+        })],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    const expectedRule = expect.objectContaining({
+      type: 'registry',
+      keyPath: 'HKEY_LOCAL_MACHINE\\SOFTWARE\\IntuneGet\\Apps\\Anysphere_Cursor',
+      detectionValue: '3.14.27',
+    });
+    expect(JSON.parse(ensureQaDemandMock.mock.calls[0][1].detectionRules)).toEqual([
+      expectedRule,
+    ]);
+    expect(JSON.parse(triggerPackagingWorkflowMock.mock.calls[0][0].detectionRules)).toEqual([
+      expectedRule,
+    ]);
+    expect(JSON.parse(triggerPackagingWorkflowMock.mock.calls[0][0].psadtConfig)).toMatchObject({
+      detectionRules: [expectedRule],
+    });
+    expect(createMock.mock.calls[0][0].package_config).toMatchObject({
+      detectionRules: [expectedRule],
+      psadtConfig: { detectionRules: [expectedRule] },
+    });
+  });
+
+  it('preserves configured PSADT rules when the top-level list is unusable', async () => {
+    const fileRule = {
+      type: 'file',
+      path: '%ProgramFiles%\\Cursor',
+      fileOrFolderName: 'Cursor.exe',
+      detectionType: 'exists',
+    };
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [makeWin32Item({
+          detectionRules: [{}],
+          psadtConfig: { ...DEFAULT_PSADT_CONFIG, detectionRules: [fileRule] },
+        })],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(ensureQaDemandMock.mock.calls[0][1].detectionRules)).toEqual([fileRule]);
+    expect(JSON.parse(triggerPackagingWorkflowMock.mock.calls[0][0].detectionRules)).toEqual([
+      fileRule,
+    ]);
+    expect(createMock.mock.calls[0][0].package_config).toMatchObject({
+      detectionRules: [fileRule],
+      psadtConfig: { detectionRules: [fileRule] },
+    });
+  });
+
+  it('leaves custom-source detection rules untouched', async () => {
+    const fileRule = {
+      type: 'file',
+      path: '%LocalAppData%\\Custom App',
+      fileOrFolderName: 'Custom.exe',
+      detectionType: 'exists',
+    };
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [makeWin32Item({
+          sourceType: 'custom',
+          installerSha256: '',
+          detectionRules: [fileRule],
+        })],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(ensureQaDemandMock).not.toHaveBeenCalled();
+    expect(JSON.parse(triggerPackagingWorkflowMock.mock.calls[0][0].detectionRules)).toEqual([
+      fileRule,
+    ]);
+    expect(createMock.mock.calls[0][0].package_config).toMatchObject({
+      sourceType: 'custom',
+      detectionRules: [fileRule],
+    });
+  });
+
+  it('fails closed before job creation when a catalog identity is missing', async () => {
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [makeWin32Item({ wingetId: undefined })],
+      }),
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: false,
+      errors: [{ error: 'Catalog package detection requires a non-empty Winget ID' }],
+    });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(ensureQaDemandMock).not.toHaveBeenCalled();
+    expect(triggerPackagingWorkflowMock).not.toHaveBeenCalled();
+  });
+
   it('parks a customer deployment until its exact execution profile passes QA', async () => {
     ensureQaDemandMock.mockResolvedValueOnce({
       state: 'waiting',
