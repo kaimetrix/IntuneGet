@@ -31,7 +31,8 @@ const canRunWindowsPowerShellPackager =
 function generateRegistryUninstallPackage(
   installerType: 'inno' | 'burn',
   displayName = 'Contract Test App',
-  installerSuccessCodes: number[] = []
+  installerSuccessCodes: number[] = [],
+  psadtConfig: unknown = {}
 ): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'intuneget-psadt-packager-'));
 
@@ -72,7 +73,7 @@ function generateRegistryUninstallPackage(
         INPUT_UNINSTALL_COMMAND: `REGISTRY_UNINSTALL:${displayName}`,
         INSTALLER_PATH: installerPath,
         INSTALLER_FILENAME: 'setup.exe',
-        PSADT_CONFIG: '{}',
+        PSADT_CONFIG: JSON.stringify(psadtConfig),
       },
     });
 
@@ -350,6 +351,131 @@ describe('PSADT registry uninstall identity contract', () => {
       'never forward the install-only --mode=stub value'
     );
   });
+
+  it('uses the PSADT v4.1 process lifecycle for install and uninstall', () => {
+    expect(packager).toContain('AppProcessesToClose = $processesArrayStr');
+    expect(packager).toContain(
+      '-CloseProcesses $adtSession.AppProcessesToClose'
+    );
+    expect(packager).toContain(
+      'Apply the PSADT v4.1 application process lifecycle before removal.'
+    );
+    expect(packager).not.toContain('$script:ProcessesToClose');
+
+    const uninstallFunction = packager.indexOf("'function Uninstall-ADTDeployment'");
+    const uninstallLifecycle = packager.indexOf(
+      'if ($uninstallWelcomeCall)',
+      uninstallFunction
+    );
+    expect(uninstallFunction).toBeGreaterThan(-1);
+    expect(uninstallLifecycle).toBeGreaterThan(uninstallFunction);
+  });
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'emits the configured process lifecycle inside both generated functions',
+    () => {
+      const generated = generateRegistryUninstallPackage(
+        'inno',
+        'Lifecycle Contract App',
+        [],
+        {
+          processesToClose: [
+            { name: 'StreamDeck.exe', description: "Elgato's Stream Deck" },
+          ],
+          showClosePrompt: false,
+        }
+      );
+
+      expect(generated).toContain(
+        "AppProcessesToClose = @(\n    @{ Name = 'StreamDeck'; Description = 'Elgato''s Stream Deck' }\n)"
+      );
+      expect(
+        generated.match(
+          /Show-ADTInstallationWelcome -CloseProcesses \$adtSession\.AppProcessesToClose -Silent/g
+        )
+      ).toHaveLength(2);
+      expect(generated.indexOf('Show-ADTInstallationWelcome')).toBeGreaterThan(
+        generated.indexOf('function Install-ADTDeployment')
+      );
+      const uninstallFunction = generated.indexOf('function Uninstall-ADTDeployment');
+      expect(generated.indexOf('Show-ADTInstallationWelcome', uninstallFunction)).toBeGreaterThan(
+        uninstallFunction
+      );
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'emits one valid force-countdown parameter set and never combines it with Silent',
+    () => {
+      const generated = generateRegistryUninstallPackage(
+        'inno',
+        'Deferral Contract App',
+        [],
+        {
+          processesToClose: [{ name: 'Example', description: 'Example' }],
+          showClosePrompt: false,
+          allowDefer: true,
+          deferTimes: 2,
+          forceCloseProcessesCountdown: 45,
+        }
+      );
+
+      expect(generated).toContain(
+        'Show-ADTInstallationWelcome -CloseProcesses $adtSession.AppProcessesToClose -AllowDeferCloseProcesses -ForceCloseProcessesCountdown 45 -DeferTimes 2'
+      );
+      expect(generated).not.toContain(
+        '-ForceCloseProcessesCountdown 45 -ForceCloseProcessesCountdown'
+      );
+      expect(generated).not.toContain(
+        '-Silent -ForceCloseProcessesCountdown'
+      );
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'fails packaging instead of dropping an unsafe process entry',
+    () => {
+      expect(() => generateRegistryUninstallPackage(
+        'inno',
+        'Unsafe Process Contract App',
+        [],
+        {
+          processesToClose: [{ name: '..\\unsafe.exe', description: 'Unsafe' }],
+        }
+      )).toThrow('Invalid PSADT process name');
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'rejects non-object configs and string booleans before generation',
+    () => {
+      expect(() => generateRegistryUninstallPackage(
+        'inno',
+        'Array Config Contract App',
+        [],
+        [{ processesToClose: [] }]
+      )).toThrow('top-level PSADT_CONFIG value');
+
+      expect(() => generateRegistryUninstallPackage(
+        'inno',
+        'Boolean Config Contract App',
+        [],
+        { showClosePrompt: 'false' }
+      )).toThrow('showClosePrompt must be a JSON boolean');
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'rejects a malformed deferral deadline during packaging',
+    () => {
+      expect(() => generateRegistryUninstallPackage(
+        'inno',
+        'Deadline Contract App',
+        [],
+        { allowDefer: true, deferDeadline: 'next Tuesday' }
+      )).toThrow('deferDeadline must be a valid ISO date');
+    }
+  );
 
   it('adds verified silent arguments when other vendors only register an interactive uninstall', () => {
     expect(packager).toContain("$registeredInstallerType -eq ''inno''");

@@ -416,6 +416,7 @@ export class JobProcessor {
     const appVendor = job.publisher.replace(/'/g, "''");
     const appName = job.display_name.replace(/'/g, "''");
     const appArch = job.architecture ?? '';
+    const processLifecycle = this.getProcessLifecycle(job);
 
     return `<#
 .SYNOPSIS
@@ -459,6 +460,7 @@ $adtSession = @{
     AppRevision = '01'
     AppSuccessExitCodes = @(${successExitCodes.join(', ')})
     AppRebootExitCodes = @(1641, 3010)
+    AppProcessesToClose = ${processLifecycle.sessionLiteral}
     AppScriptVersion = '1.0.0'
     AppScriptDate = (Get-Date -Format 'yyyy-MM-dd')
     AppScriptAuthor = 'IntuneGet'
@@ -474,6 +476,7 @@ function Install-ADTDeployment
 {
     [CmdletBinding()]
     param ()
+${processLifecycle.installBlock}
 ${this.getRegistryInstallSnapshotBlock(job, appName)}
 ${this.getPreInstallRemovalBlock(job, appName)}
     ## Install the application
@@ -488,6 +491,7 @@ function Uninstall-ADTDeployment
 {
     [CmdletBinding()]
     param ()
+${processLifecycle.uninstallBlock}
 
     ## Uninstall the application
     ${this.getUninstallCommand(job, installerFileName)}
@@ -570,6 +574,209 @@ catch
       return null;
     }
     return psadtConfig as Record<string, unknown>;
+  }
+
+  private getProcessLifecycle(job: PackagingJob): {
+    sessionLiteral: string;
+    installBlock: string;
+    uninstallBlock: string;
+  } {
+    const config = this.getPsadtConfig(job);
+    const configuredProcesses = config?.processesToClose;
+    if (configuredProcesses !== undefined && configuredProcesses !== null &&
+        !Array.isArray(configuredProcesses)) {
+      throw new Error('PSADT processesToClose must be an array');
+    }
+    const rawProcesses = Array.isArray(configuredProcesses) ? configuredProcesses : [];
+    if (rawProcesses.length > 50) {
+      throw new Error('PSADT processesToClose cannot contain more than 50 entries');
+    }
+
+    const configuredNames = new Set<string>();
+    const processes: Array<{ name: string; description: string }> = [];
+    for (const raw of rawProcesses) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('Each PSADT process entry must be an object');
+      }
+      const process = raw as Record<string, unknown>;
+      if (typeof process.name !== 'string') {
+        throw new Error('Each PSADT process entry must contain a string name');
+      }
+      const name = process.name.trim().replace(/\.exe$/i, '');
+      if (!name || name.length > 260 || /[\x00-\x1F\x7F\\/:*?"<>|]/.test(name)) {
+        throw new Error(
+          `Invalid PSADT process name [${process.name}]; use an executable name without a path or .exe suffix`
+        );
+      }
+      if (process.description !== undefined && process.description !== null &&
+          typeof process.description !== 'string') {
+        throw new Error(`The PSADT process description for [${name}] must be a string`);
+      }
+      const description = typeof process.description === 'string' && process.description.trim()
+        ? process.description.replace(/[\x00-\x1F\x7F]+/g, ' ').trim()
+        : name;
+      if (description.length > 260) {
+        throw new Error(`The PSADT process description for [${name}] cannot exceed 260 characters`);
+      }
+      const normalizedName = name.toLowerCase();
+      if (!configuredNames.has(normalizedName)) {
+        processes.push({ name, description });
+        configuredNames.add(normalizedName);
+      }
+    }
+
+    const sessionLiteral = processes.length === 0 ? '@()' : `@(${processes
+      .map(({ name, description }) =>
+        `@{ Name = '${name.replace(/'/g, "''")}'; Description = '${description.replace(/'/g, "''")}' }`
+      )
+      .join(', ')})`;
+
+    const boundedInteger = (
+      value: unknown,
+      setting: string,
+      fallback: number | null,
+      maximum: number
+    ): number | null => {
+      if (value === undefined || value === null) return fallback;
+      if (typeof value === 'string' && !value.trim()) {
+        throw new Error(`PSADT ${setting} must be an integer from 0 through ${maximum}`);
+      }
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) {
+        throw new Error(`PSADT ${setting} must be an integer from 0 through ${maximum}`);
+      }
+      return parsed;
+    };
+
+    const strictBoolean = (setting: string, fallback = false): boolean => {
+      const value = config?.[setting];
+      if (value === undefined || value === null) return fallback;
+      if (typeof value !== 'boolean') {
+        throw new Error(`PSADT ${setting} must be a boolean`);
+      }
+      return value;
+    };
+
+    const showClosePrompt = strictBoolean('showClosePrompt');
+    const closeCountdown = boundedInteger(config?.closeCountdown, 'closeCountdown', 60, 86_400)!;
+    const forceCloseCountdown = boundedInteger(
+      config?.forceCloseProcessesCountdown,
+      'forceCloseProcessesCountdown',
+      null,
+      86_400
+    );
+    const allowDefer = strictBoolean('allowDefer');
+    const deferTimes = boundedInteger(config?.deferTimes, 'deferTimes', 3, 1_000)!;
+    const blockExecution = strictBoolean('blockExecution');
+    const promptToSave = strictBoolean('promptToSave');
+    const persistPrompt = strictBoolean('persistPrompt');
+    const minimizeWindows = strictBoolean('minimizeWindows');
+    const allowedWindowLocations = new Set([
+      'Default', 'Center', 'Top', 'Bottom', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight',
+    ]);
+    const windowLocation = typeof config?.windowLocation === 'string' && config.windowLocation
+      ? config.windowLocation
+      : 'Default';
+    if (!allowedWindowLocations.has(windowLocation)) {
+      throw new Error(`Unsupported PSADT windowLocation [${windowLocation}]`);
+    }
+
+    let deferDays: number | null = null;
+    if (config?.deferDays !== undefined && config.deferDays !== null) {
+      deferDays = Number(config.deferDays);
+      if (!Number.isFinite(deferDays) || deferDays < 0 || deferDays > 3_650) {
+        throw new Error('PSADT deferDays must be a number from 0 through 3650');
+      }
+    }
+    let deferDeadline: string | null = null;
+    if (config?.deferDeadline !== undefined && config.deferDeadline !== null) {
+      if (typeof config.deferDeadline !== 'string') {
+        throw new Error('PSADT deferDeadline must be a valid ISO date or date-time string');
+      }
+      const candidateDeferDeadline = config.deferDeadline.trim();
+      if (candidateDeferDeadline && (
+          candidateDeferDeadline.length > 64 ||
+          !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,7})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(
+            candidateDeferDeadline
+          ) ||
+          Number.isNaN(Date.parse(candidateDeferDeadline)))) {
+        throw new Error('PSADT deferDeadline must be a valid ISO date or date-time string');
+      }
+      deferDeadline = candidateDeferDeadline || null;
+    }
+    const checkDiskSpace = strictBoolean('checkDiskSpace');
+    const requiredDiskSpace = boundedInteger(
+      config?.requiredDiskSpace,
+      'requiredDiskSpace',
+      null,
+      0xFFFF_FFFF
+    );
+
+    const addInteractiveOptions = (parameters: string[]): void => {
+      if (promptToSave && processes.length > 0) parameters.push('-PromptToSave');
+      if (persistPrompt) parameters.push('-PersistPrompt');
+      if (minimizeWindows) parameters.push('-MinimizeWindows');
+      if (windowLocation !== 'Default') parameters.push(`-WindowLocation '${windowLocation}'`);
+    };
+
+    const installParameters: string[] = [];
+    const interactiveInstall = allowDefer || (processes.length > 0 && showClosePrompt);
+    if (processes.length > 0) {
+      installParameters.push('-CloseProcesses $adtSession.AppProcessesToClose');
+      if (allowDefer) {
+        installParameters.push('-AllowDeferCloseProcesses');
+        installParameters.push(forceCloseCountdown !== null
+          ? `-ForceCloseProcessesCountdown ${forceCloseCountdown}`
+          : `-CloseProcessesCountdown ${closeCountdown}`);
+        installParameters.push(`-DeferTimes ${deferTimes}`);
+        if (deferDeadline) installParameters.push(`-DeferDeadline '${deferDeadline}'`);
+        if (deferDays !== null) installParameters.push(`-DeferDays ${deferDays}`);
+      } else if (showClosePrompt) {
+        installParameters.push(forceCloseCountdown !== null
+          ? `-ForceCloseProcessesCountdown ${forceCloseCountdown}`
+          : `-CloseProcessesCountdown ${closeCountdown}`);
+      } else {
+        installParameters.push('-Silent');
+      }
+      if (blockExecution) installParameters.push('-BlockExecution');
+    } else if (allowDefer) {
+      installParameters.push('-AllowDefer', `-DeferTimes ${deferTimes}`);
+      if (deferDeadline) installParameters.push(`-DeferDeadline '${deferDeadline}'`);
+      if (deferDays !== null) installParameters.push(`-DeferDays ${deferDays}`);
+    }
+    if (interactiveInstall) addInteractiveOptions(installParameters);
+    if (checkDiskSpace) {
+      installParameters.push('-CheckDiskSpace');
+      if (requiredDiskSpace !== null) {
+        installParameters.push(`-RequiredDiskSpace ${requiredDiskSpace}`);
+      }
+    }
+
+    const uninstallParameters: string[] = [];
+    if (processes.length > 0) {
+      uninstallParameters.push('-CloseProcesses $adtSession.AppProcessesToClose');
+      if (showClosePrompt) {
+        uninstallParameters.push(forceCloseCountdown !== null
+          ? `-ForceCloseProcessesCountdown ${forceCloseCountdown}`
+          : `-CloseProcessesCountdown ${closeCountdown}`);
+        addInteractiveOptions(uninstallParameters);
+      } else {
+        uninstallParameters.push('-Silent');
+      }
+      if (blockExecution) uninstallParameters.push('-BlockExecution');
+    }
+
+    const welcomeBlock = (parameters: string[], phase: string): string =>
+      parameters.length === 0 ? '' : `
+    ## Apply the PSADT v4.1 application process lifecycle for ${phase}
+    Show-ADTInstallationWelcome ${parameters.join(' ')}
+`;
+
+    return {
+      sessionLiteral,
+      installBlock: welcomeBlock(installParameters, 'installation'),
+      uninstallBlock: welcomeBlock(uninstallParameters, 'uninstallation'),
+    };
   }
 
   /**

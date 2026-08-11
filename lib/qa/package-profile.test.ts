@@ -5,10 +5,12 @@ import {
   buildQaPackageIdentityFromWorkflowInput,
   canonicalQaJson,
   normalizeQaWorkflowPackageInput,
+  QA_COMPATIBLE_PASSED_PACKAGER_COMMITS,
   QA_PACKAGE_PROFILE_SCHEMA_VERSION,
   QA_PSADT_TOOLCHAIN,
   qaSha256,
   splitQaPsadtConfig,
+  validateCompatiblePassedCatalogQaProfile,
   validateCurrentQaPackageProfile,
 } from './package-profile';
 
@@ -184,6 +186,38 @@ describe('PSADT QA package identity', () => {
 });
 
 describe('current catalog QA package validation', () => {
+  function candidateFromIdentity(identity: ReturnType<typeof buildQaPackageIdentity>) {
+    const profile = identity.profile as {
+      app: { wingetId: string; version: string; architecture: string };
+      installer: { sha256: string };
+    };
+    return {
+      testConfig: {
+        profileKind: 'catalog-default',
+        packageProfileCanonicalJson: identity.canonicalJson,
+        packageProfileSha256: identity.packageProfileSha256,
+      },
+      candidatePackageProfileSha256: identity.packageProfileSha256,
+      candidateWingetId: profile.app.wingetId,
+      candidateVersion: profile.app.version,
+      candidateArchitecture: profile.app.architecture,
+      candidateInstallerSha256: profile.installer.sha256,
+    };
+  }
+
+  function identityWithPackagerCommit(
+    identity: ReturnType<typeof buildQaPackageIdentity>,
+    packagerCommit: string
+  ) {
+    const profile = {
+      ...identity.profile,
+      toolchain: { ...QA_PSADT_TOOLCHAIN, packagerCommit },
+    };
+    const canonicalJson = canonicalQaJson(profile);
+    const packageProfileSha256 = qaSha256(canonicalJson);
+    return { ...identity, profile, canonicalJson, packageProfileSha256 };
+  }
+
   function currentCandidate() {
     const identity = buildQaPackageIdentity(input);
     return {
@@ -204,6 +238,58 @@ describe('current catalog QA package validation', () => {
     expect(validateCurrentQaPackageProfile(currentCandidate())).toMatchObject({
       valid: true,
     });
+  });
+
+  it('reuses an older catalog pass only when lifecycle behavior is unaffected', () => {
+    const priorCommit = QA_COMPATIBLE_PASSED_PACKAGER_COMMITS.find(
+      (commit) => commit !== QA_PSADT_TOOLCHAIN.packagerCommit
+    );
+    expect(priorCommit).toBeTruthy();
+    const legacyIdentity = identityWithPackagerCommit(
+      buildQaPackageIdentity(input),
+      priorCommit!
+    );
+
+    expect(
+      validateCompatiblePassedCatalogQaProfile(candidateFromIdentity(legacyIdentity))
+    ).toMatchObject({ valid: true });
+  });
+
+  it('does not reuse an older pass with configured process lifecycle behavior', () => {
+    const priorCommit = QA_COMPATIBLE_PASSED_PACKAGER_COMMITS.find(
+      (commit) => commit !== QA_PSADT_TOOLCHAIN.packagerCommit
+    )!;
+    const legacyIdentity = identityWithPackagerCommit(
+      buildQaPackageIdentity({
+        ...input,
+        psadtConfig: {
+          ...DEFAULT_PSADT_CONFIG,
+          processesToClose: [{ name: 'Example', description: 'Example' }],
+        },
+      }),
+      priorCommit
+    );
+
+    expect(
+      validateCompatiblePassedCatalogQaProfile(candidateFromIdentity(legacyIdentity))
+    ).toEqual({ valid: false, reason: 'compatible-process-lifecycle-changed' });
+  });
+
+  it('does not reuse an older pass when the current app adapter adds behavior', () => {
+    const priorCommit = QA_COMPATIBLE_PASSED_PACKAGER_COMMITS.find(
+      (commit) => commit !== QA_PSADT_TOOLCHAIN.packagerCommit
+    )!;
+    const legacyIdentity = identityWithPackagerCommit(
+      buildQaPackageIdentity({
+        ...input,
+        wingetId: 'Elgato.StreamDeck',
+      }),
+      priorCommit
+    );
+
+    expect(
+      validateCompatiblePassedCatalogQaProfile(candidateFromIdentity(legacyIdentity))
+    ).toEqual({ valid: false, reason: 'compatible-application-adapter-changed' });
   });
 
   it('normalizes case and whitespace on both sides of candidate bindings', () => {

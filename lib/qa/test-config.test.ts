@@ -328,4 +328,28 @@ describe('buildQaCatalogTestConfig', () => {
       'if (-not $package -and $runningAsSystem) { $package = Get-AppxPackage -Name "Microsoft.WindowsTerminal" -AllUsers }'
     );
   });
+
+  it('includes the reviewed Stream Deck process adapter in the catalog profile', () => {
+    const config = buildQaCatalogTestConfig({
+      app: {
+        wingetId: 'Elgato.StreamDeck',
+        name: 'Elgato Stream Deck',
+        publisher: 'Elgato',
+        version: '7.5.1.22901',
+      },
+      manifest: {
+        InstallerType: 'wix',
+        Scope: 'machine',
+        ProductCode: '{ED591028-8D85-4D44-AA11-B2D8EC905F91}',
+      },
+      installer: {
+        Architecture: 'x64',
+        InstallerType: 'wix',
+      },
+    });
+
+    expect(config.psadtConfig.processesToClose).toEqual([
+      { name: 'StreamDeck', description: 'Elgato Stream Deck' },
+    ]);
+  });
 });

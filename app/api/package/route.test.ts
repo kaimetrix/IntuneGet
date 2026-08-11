@@ -94,6 +94,7 @@ vi.mock('@/lib/store-app-deploy', () => ({
 
 import { GET, POST } from '@/app/api/package/route';
 import { InstallerPreflightError } from '@/lib/installer-preflight';
+import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
 
 function makeJob(overrides: Partial<PackagingJob>): PackagingJob {
   const now = new Date().toISOString();
@@ -342,6 +343,39 @@ describe('POST /api/package (workflow dispatch)', () => {
     expect(response.status).toBe(200);
     expect(triggerPackagingWorkflowMock).toHaveBeenCalledTimes(1);
     expect(triggerPackagingWorkflowMock.mock.calls[0][0].relationships).toBeUndefined();
+  });
+
+  it('uses the reviewed app adapter for both QA and customer packaging', async () => {
+    const request = new NextRequest('http://localhost:3000/api/package', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [makeWin32Item({
+          wingetId: 'Elgato.StreamDeck',
+          displayName: 'Elgato Stream Deck',
+          psadtConfig: { ...DEFAULT_PSADT_CONFIG, processesToClose: [] },
+        })],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    const expectedProcesses = [
+      { name: 'StreamDeck', description: 'Elgato Stream Deck' },
+    ];
+    expect(JSON.parse(ensureQaDemandMock.mock.calls[0][1].psadtConfig)).toMatchObject({
+      processesToClose: expectedProcesses,
+    });
+    expect(JSON.parse(triggerPackagingWorkflowMock.mock.calls[0][0].psadtConfig)).toMatchObject({
+      processesToClose: expectedProcesses,
+    });
+    expect(createMock.mock.calls[0][0].package_config).toMatchObject({
+      psadtConfig: { processesToClose: expectedProcesses },
+    });
   });
 
   it('parks a customer deployment until its exact execution profile passes QA', async () => {

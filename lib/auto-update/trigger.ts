@@ -24,7 +24,9 @@ import { extractSilentSwitches } from '@/lib/msp/silent-switches';
 import { generateInstallCommand } from '@/lib/detection-rules';
 import { normalizeInstaller } from '@/lib/manifest-api';
 import { upgradeLegacyPackageDefaults } from '@/lib/update-policies/upgrade-legacy-package-defaults';
+import { applyApplicationPackagingAdapter } from '@/lib/packaging-adapters';
 import type { NormalizedInstaller, WingetInstaller, WingetScope } from '@/types/winget';
+import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
 
 interface TriggerResult {
   success: boolean;
@@ -204,7 +206,18 @@ export class AutoUpdateTrigger {
       // later used by both GitHub Actions and the self-hosted packager.
       await this.ensureCurrentPackageDefaults(policy, updateInfo);
 
-      const deploymentConfig = policy.deployment_config as DeploymentConfig;
+      const storedDeploymentConfig = policy.deployment_config as DeploymentConfig;
+      const deploymentConfig: DeploymentConfig = {
+        ...storedDeploymentConfig,
+        psadtConfig: applyApplicationPackagingAdapter(
+        updateInfo.wingetId,
+          storedDeploymentConfig.psadtConfig || DEFAULT_PSADT_CONFIG
+        ),
+      };
+      // Keep the effective adapter in this update attempt so QA and the job
+      // receive the same config, without persisting derived adapter output into
+      // the customer's policy. A later adapter revision is therefore reapplied.
+      policy.deployment_config = deploymentConfig;
       const sourceInstallerType =
         updateInfo.installerType || deploymentConfig.installerType || 'exe';
       const customInstallCommand = deploymentConfig.psadtConfig?.installCommand?.trim();

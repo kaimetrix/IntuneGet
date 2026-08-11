@@ -64,6 +64,97 @@ describe('nested portable PSADT generation', () => {
     expect(script).toContain('AppSuccessExitCodes = @(0, 1168)');
   });
 
+  it('applies configured PSADT v4.1 processes before install and uninstall', () => {
+    const script = generator.generateDeployScript.call(generator, packagingJob({
+      package_config: {
+        nestedInstallerType: 'portable',
+        nestedInstallerPath: 'piicrawler.exe',
+        psadtConfig: {
+          processesToClose: [
+            { name: 'StreamDeck.exe', description: "Elgato's Stream Deck" },
+          ],
+          showClosePrompt: false,
+        },
+      },
+    }), 'piicrawler.zip');
+
+    expect(script).toContain(
+      "AppProcessesToClose = @(@{ Name = 'StreamDeck'; Description = 'Elgato''s Stream Deck' })"
+    );
+    expect(
+      script.match(
+        /Show-ADTInstallationWelcome -CloseProcesses \$adtSession\.AppProcessesToClose -Silent/g
+      )
+    ).toHaveLength(2);
+  });
+
+  it('uses a valid interactive deferral parameter set without duplicate countdowns', () => {
+    const script = generator.generateDeployScript.call(generator, packagingJob({
+      package_config: {
+        nestedInstallerType: 'portable',
+        nestedInstallerPath: 'piicrawler.exe',
+        psadtConfig: {
+          processesToClose: [{ name: 'Example', description: 'Example' }],
+          showClosePrompt: false,
+          allowDefer: true,
+          deferTimes: 2,
+          forceCloseProcessesCountdown: 45,
+        },
+      },
+    }), 'piicrawler.zip');
+
+    expect(script).toContain(
+      'Show-ADTInstallationWelcome -CloseProcesses $adtSession.AppProcessesToClose -AllowDeferCloseProcesses -ForceCloseProcessesCountdown 45 -DeferTimes 2'
+    );
+    expect(script).not.toContain(
+      '-ForceCloseProcessesCountdown 45 -ForceCloseProcessesCountdown'
+    );
+    expect(script).not.toContain('-Silent -ForceCloseProcessesCountdown');
+  });
+
+  it('fails closed instead of dropping malformed process lifecycle entries', () => {
+    const job = packagingJob({
+      package_config: {
+        nestedInstallerType: 'portable',
+        nestedInstallerPath: 'piicrawler.exe',
+        psadtConfig: {
+          processesToClose: [{ name: '..\\unsafe.exe', description: 'Unsafe' }],
+        },
+      },
+    });
+
+    expect(() => generator.generateDeployScript.call(generator, job, 'piicrawler.zip'))
+      .toThrow('Invalid PSADT process name');
+  });
+
+  it('rejects string booleans and malformed deferral deadlines', () => {
+    const stringBooleanJob = packagingJob({
+      package_config: {
+        nestedInstallerType: 'portable',
+        nestedInstallerPath: 'piicrawler.exe',
+        psadtConfig: { showClosePrompt: 'false' },
+      },
+    });
+    expect(() => generator.generateDeployScript.call(
+      generator,
+      stringBooleanJob,
+      'piicrawler.zip'
+    )).toThrow('showClosePrompt must be a boolean');
+
+    const invalidDeadlineJob = packagingJob({
+      package_config: {
+        nestedInstallerType: 'portable',
+        nestedInstallerPath: 'piicrawler.exe',
+        psadtConfig: { allowDefer: true, deferDeadline: 'next Tuesday' },
+      },
+    });
+    expect(() => generator.generateDeployScript.call(
+      generator,
+      invalidDeadlineJob,
+      'piicrawler.zip'
+    )).toThrow('deferDeadline must be a valid ISO date');
+  });
+
   it('safely stages the full archive and never executes the nested portable file', () => {
     const script = installScript(packagingJob());
 

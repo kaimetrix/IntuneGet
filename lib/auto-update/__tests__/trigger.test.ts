@@ -251,6 +251,73 @@ describe('AutoUpdateTrigger psadtConfig handling', () => {
     expect(candidateInsertSpy).not.toHaveBeenCalled();
   });
 
+  it('applies the same app adapter to auto-update QA and customer packaging', async () => {
+    const candidateInsertSpy = vi.fn();
+    const supabase = createSupabaseMock({
+      qa_package_results: {
+        maybeSingleResult: { data: null, error: null },
+      },
+      qa_candidates: {
+        insertSpy: candidateInsertSpy,
+        maybeSingleResult: {
+          data: { id: 'candidate-elgato', status: 'queued', failure_summary: null },
+          error: null,
+        },
+      },
+    });
+    const trigger = makeTrigger(supabase);
+    const storedConfig: DeploymentConfig = {
+      displayName: 'Elgato Stream Deck',
+      publisher: 'Elgato',
+      architecture: 'x64',
+      installerType: 'msi',
+      installCommand: 'msiexec /i setup.msi /qn',
+      uninstallCommand: 'msiexec /x {PRODUCT-CODE} /qn',
+      installScope: 'machine',
+      detectionRules: [],
+      psadtConfig: { ...DEFAULT_PSADT_CONFIG, processesToClose: [] },
+    };
+    const policy = makePolicy(storedConfig);
+    policy.original_upload_history_id = 'prior-upload';
+    policy.consecutive_failures = 0;
+
+    vi.spyOn(trigger as never, 'verifyTenantConsent' as never).mockResolvedValue(true as never);
+    vi.spyOn(trigger as never, 'ensurePsadtConfig' as never).mockResolvedValue(undefined as never);
+    vi.spyOn(trigger as never, 'ensureCurrentPackageDefaults' as never).mockResolvedValue(undefined as never);
+    vi.spyOn(trigger as never, 'createHistoryRecord' as never)
+      .mockResolvedValue({ id: 'history-elgato' } as never);
+    const createPackagingJobSpy = vi.spyOn(trigger as never, 'createPackagingJob' as never)
+      .mockResolvedValue({ id: 'job-elgato' } as never);
+    vi.spyOn(trigger as never, 'updateHistoryRecord' as never).mockResolvedValue(undefined as never);
+    vi.spyOn(trigger as never, 'updatePolicyTracking' as never).mockResolvedValue(undefined as never);
+
+    const result = await trigger.triggerAutoUpdate(policy, {
+      ...UPDATE_INFO,
+      wingetId: 'elgato.streamdeck',
+      displayName: 'Elgato Stream Deck',
+      installerType: 'msi',
+      nestedInstallerType: undefined,
+      nestedInstallerPath: undefined,
+    }, { skipRateLimits: true });
+
+    expect(result).toMatchObject({ success: true, packagingJobId: 'job-elgato' });
+    const candidateRow = candidateInsertSpy.mock.calls[0][0] as {
+      test_config: { psadtConfig: { processesToClose: unknown[] } };
+    };
+    expect(candidateRow.test_config.psadtConfig.processesToClose).toEqual([
+      // Presentation-only descriptions are deliberately normalized in the QA
+      // execution profile; the process name and lifecycle behavior are exact.
+      { name: 'StreamDeck', description: 'StreamDeck' },
+    ]);
+    const effectivePolicy = createPackagingJobSpy.mock.calls[0][0] as AppUpdatePolicy;
+    expect(
+      (effectivePolicy.deployment_config as DeploymentConfig).psadtConfig?.processesToClose
+    ).toEqual([
+      { name: 'StreamDeck', description: 'Elgato Stream Deck' },
+    ]);
+    expect(storedConfig.psadtConfig?.processesToClose).toEqual([]);
+  });
+
   describe('ensurePsadtConfig', () => {
     it('backfills psadtConfig from the most recent packaging job and persists it', async () => {
       const updateSpy = vi.fn();

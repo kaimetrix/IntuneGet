@@ -3,6 +3,7 @@ import { reconcileManagedMarkerDetectionRules } from '@/lib/registry-marker';
 import { assertPackagingContract } from '@/lib/packaging-contract';
 import type { DetectionRule } from '@/types/intune';
 import { DEFAULT_PSADT_CONFIG, type PSADTConfig } from '@/types/psadt';
+import { applyApplicationPackagingAdapter } from '@/lib/packaging-adapters';
 
 export const QA_PSADT_TOOLCHAIN = {
   packagerRepository: 'ugurkocde/IntuneGet',
@@ -361,7 +362,41 @@ export function validateCurrentQaPackageProfile(
 export function validateCompatiblePassedCatalogQaProfile(
   input: QaPackageProfileValidationInput
 ): QaPackageProfileValidation {
-  return validateQaPackageProfile(input, QA_COMPATIBLE_PASSED_PACKAGER_COMMITS);
+  const validation = validateQaPackageProfile(
+    input,
+    QA_COMPATIBLE_PASSED_PACKAGER_COMMITS
+  );
+  if (!validation.valid || !validation.canonicalJson) return validation;
+
+  // Older successful catalog profiles remain reusable only when this
+  // lifecycle change cannot affect their generated script. Customer and
+  // queued deployment profiles always require the exact current commit.
+  const profile = record(JSON.parse(validation.canonicalJson));
+  const toolchain = record(profile?.toolchain);
+  if (textValue(toolchain?.packagerCommit) === QA_PSADT_TOOLCHAIN.packagerCommit) {
+    return validation;
+  }
+
+  const psadtConfig = record(profile?.psadtConfig);
+  const configuredProcesses = Array.isArray(psadtConfig?.processesToClose)
+    ? psadtConfig.processesToClose
+    : [];
+  if (configuredProcesses.length > 0) {
+    return { valid: false, reason: 'compatible-process-lifecycle-changed' };
+  }
+
+  const app = record(profile?.app);
+  const wingetId = textValue(app?.wingetId);
+  if (!wingetId || !psadtConfig) {
+    return { valid: false, reason: 'compatible-profile-invalid' };
+  }
+  const typedPsadtConfig = psadtConfig as unknown as PSADTConfig;
+  const adapted = applyApplicationPackagingAdapter(wingetId, typedPsadtConfig);
+  if (adapted !== typedPsadtConfig) {
+    return { valid: false, reason: 'compatible-application-adapter-changed' };
+  }
+
+  return validation;
 }
 
 export function normalizeQaPsadtConfig(
@@ -484,7 +519,10 @@ export function normalizeQaWorkflowPackageInput(input: QaWorkflowPackageInput): 
     installScope: input.installScope || 'machine',
     markerPath: preliminaryConfig.registryMarkerPath,
   });
-  const psadtConfig = normalizeQaPsadtConfig(rawConfig, detectionRules);
+  const psadtConfig = applyApplicationPackagingAdapter(
+    input.wingetId,
+    normalizeQaPsadtConfig(rawConfig, detectionRules)
+  );
   const identity = buildQaPackageIdentity({
     profileKind: 'deployment-config',
     wingetId: input.wingetId,

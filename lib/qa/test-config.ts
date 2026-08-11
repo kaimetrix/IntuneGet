@@ -2,6 +2,7 @@ import { generateDetectionRules, generateUninstallCommand } from '@/lib/detectio
 import { normalizeInstaller } from '@/lib/manifest-api';
 import type { DetectionRule } from '@/types/intune';
 import { DEFAULT_PSADT_CONFIG, type PSADTConfig } from '@/types/psadt';
+import { applyApplicationPackagingAdapter } from '@/lib/packaging-adapters';
 import { normalizeQaPsadtConfig } from './package-profile';
 import type {
   WingetInstaller,
@@ -149,18 +150,21 @@ export function buildQaCatalogTestConfig({
     app.version,
     DEFAULT_PSADT_CONFIG.registryMarkerPath
   );
-  const psadtConfig: PSADTConfig = normalizeQaPsadtConfig(
-    {
-      ...DEFAULT_PSADT_CONFIG,
-      deployMode: 'Auto',
-      progressDialog: {
-        ...DEFAULT_PSADT_CONFIG.progressDialog,
-        enabled: true,
-        statusMessage: 'IntuneGet is validating this application package.',
-        windowLocation: 'BottomRight',
+  const psadtConfig: PSADTConfig = applyApplicationPackagingAdapter(
+    app.wingetId,
+    normalizeQaPsadtConfig(
+      {
+        ...DEFAULT_PSADT_CONFIG,
+        deployMode: 'Auto',
+        progressDialog: {
+          ...DEFAULT_PSADT_CONFIG.progressDialog,
+          enabled: true,
+          statusMessage: 'IntuneGet is validating this application package.',
+          windowLocation: 'BottomRight',
+        },
       },
-    },
-    detectionRules
+      detectionRules
+    )
   );
 
   return {

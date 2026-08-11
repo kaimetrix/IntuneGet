@@ -100,10 +100,31 @@ Copy-Item -LiteralPath $env:INSTALLER_PATH -Destination $filesDir
 $psadtConfig = @{}
 if ($env:PSADT_CONFIG -and $env:PSADT_CONFIG -ne '{}') {
     try {
-        $psadtConfig = $env:PSADT_CONFIG | ConvertFrom-Json -AsHashtable
+        $psadtConfig = $env:PSADT_CONFIG | ConvertFrom-Json -AsHashtable -NoEnumerate
+        if ($psadtConfig -isnot [System.Collections.IDictionary]) {
+            throw 'The top-level PSADT_CONFIG value must be a JSON object.'
+        }
     } catch {
-        Write-Host "Warning: Could not parse PSADT config, using defaults"
+        throw "PSADT_CONFIG must be valid JSON; refusing to package with different defaults. $($_.Exception.Message)"
     }
+}
+
+function Get-StrictPSADTBoolean {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [bool]$Default = $false
+    )
+
+    if (-not $Config.Contains($Name) -or $null -eq $Config[$Name]) {
+        return $Default
+    }
+    if ($Config[$Name] -isnot [bool]) {
+        throw "PSADT $Name must be a JSON boolean."
+    }
+    return [bool]$Config[$Name]
 }
 
 function ConvertTo-PSADTConfigValue {
@@ -623,27 +644,140 @@ if ($installerTypeLower -in @('msix', 'appx') -and
     throw "The MSIX/APPX package identity is missing; refusing to generate install or uninstall commands from a display-name guess."
 }
 
-# Extract app close configuration
+# Validate and normalize app close configuration before embedding it in the
+# generated deployment script. Invalid entries must fail packaging rather than
+# silently omitting a required lifecycle action.
 $processesToClose = @()
-if ($psadtConfig.processesToClose -and $psadtConfig.processesToClose.Count -gt 0) {
-    $processesToClose = $psadtConfig.processesToClose | Where-Object { $_.name -and $_.name.Trim() -ne '' }
+if ($psadtConfig.ContainsKey('processesToClose') -and $null -ne $psadtConfig.processesToClose) {
+    if ($psadtConfig.processesToClose -isnot [System.Array]) {
+        throw 'PSADT processesToClose must be a JSON array.'
+    }
+    $rawProcessesToClose = @($psadtConfig.processesToClose)
+    if ($rawProcessesToClose.Count -gt 50) {
+        throw 'PSADT processesToClose cannot contain more than 50 entries.'
+    }
+
+    $configuredProcessNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($process in $rawProcessesToClose) {
+        if ($process -isnot [System.Collections.IDictionary] -or
+            -not $process.Contains('name') -or
+            $process.name -isnot [string]) {
+            throw 'Each PSADT process entry must contain a string name.'
+        }
+        $procName = ([string]$process.name).Trim() -replace '(?i)\.exe$', ''
+        if ([string]::IsNullOrWhiteSpace($procName) -or
+            $procName.Length -gt 260 -or
+            $procName -match '[\x00-\x1F\x7F\\/:*?"<>|]') {
+            throw "Invalid PSADT process name [$($process.name)]. Use an executable name without a path or .exe suffix."
+        }
+
+        $procDesc = $procName
+        if ($process.Contains('description') -and $null -ne $process.description) {
+            if ($process.description -isnot [string]) {
+                throw "The PSADT process description for [$procName] must be a string."
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$process.description)) {
+                $procDesc = ([string]$process.description).Trim() -replace '[\x00-\x1F\x7F]+', ' '
+            }
+        }
+        if ($procDesc.Length -gt 260) {
+            throw "The PSADT process description for [$procName] cannot exceed 260 characters."
+        }
+
+        if ($configuredProcessNames.Add($procName)) {
+            $processesToClose += [pscustomobject]@{
+                name = $procName
+                description = $procDesc
+            }
+        }
+    }
 }
-$showClosePrompt = if ($psadtConfig.showClosePrompt) { $true } else { $false }
-$closeCountdown = if ($psadtConfig.closeCountdown) { [int]$psadtConfig.closeCountdown } else { 60 }
-$allowDefer = if ($psadtConfig.ContainsKey('allowDefer')) { [bool]$psadtConfig.allowDefer } else { $false }
-$deferTimes = if ($psadtConfig.deferTimes) { [int]$psadtConfig.deferTimes } else { 3 }
+$showClosePrompt = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'showClosePrompt'
+$closeCountdown = 60
+if ($psadtConfig.ContainsKey('closeCountdown') -and $null -ne $psadtConfig.closeCountdown) {
+    $parsedCloseCountdown = 0L
+    if (-not [long]::TryParse([string]$psadtConfig.closeCountdown, [ref]$parsedCloseCountdown) -or
+        $parsedCloseCountdown -lt 0 -or $parsedCloseCountdown -gt 86400) {
+        throw 'PSADT closeCountdown must be an integer from 0 through 86400.'
+    }
+    $closeCountdown = [int]$parsedCloseCountdown
+}
+$allowDefer = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'allowDefer'
+$deferTimes = 3
+if ($psadtConfig.ContainsKey('deferTimes') -and $null -ne $psadtConfig.deferTimes) {
+    $parsedDeferTimes = 0L
+    if (-not [long]::TryParse([string]$psadtConfig.deferTimes, [ref]$parsedDeferTimes) -or
+        $parsedDeferTimes -lt 0 -or $parsedDeferTimes -gt 1000) {
+        throw 'PSADT deferTimes must be an integer from 0 through 1000.'
+    }
+    $deferTimes = [int]$parsedDeferTimes
+}
 
 # Extended welcome parameters
-$blockExecution = if ($psadtConfig.blockExecution) { $true } else { $false }
-$promptToSave = if ($psadtConfig.promptToSave) { $true } else { $false }
-$deferDeadline = if ($psadtConfig.deferDeadline) { ([string]$psadtConfig.deferDeadline) -replace "'", "''" -replace '`', '``' -replace '\$', '`$' } else { $null }
-$deferDays = $psadtConfig.deferDays
-$forceCloseCountdown = $psadtConfig.forceCloseProcessesCountdown
-$persistPrompt = if ($psadtConfig.persistPrompt) { $true } else { $false }
-$minimizeWindows = if ($psadtConfig.minimizeWindows) { $true } else { $false }
-$windowLocation = if ($psadtConfig.windowLocation) { ([string]$psadtConfig.windowLocation) -replace "'", "''" -replace '`', '``' -replace '\$', '`$' } else { 'Default' }
-$checkDiskSpace = if ($psadtConfig.checkDiskSpace) { $true } else { $false }
-$requiredDiskSpace = $psadtConfig.requiredDiskSpace
+$blockExecution = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'blockExecution'
+$promptToSave = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'promptToSave'
+$deferDeadline = $null
+if ($psadtConfig.ContainsKey('deferDeadline') -and $null -ne $psadtConfig.deferDeadline) {
+    if ($psadtConfig.deferDeadline -isnot [string]) {
+        throw 'PSADT deferDeadline must be an ISO date string.'
+    }
+    $candidateDeferDeadline = ([string]$psadtConfig.deferDeadline).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($candidateDeferDeadline)) {
+        $parsedDeferDeadline = [DateTimeOffset]::MinValue
+        if ($candidateDeferDeadline.Length -gt 64 -or
+            $candidateDeferDeadline -notmatch '^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,7})?)?(?:Z|[+-]\d{2}:\d{2})?)?$' -or
+            -not [DateTimeOffset]::TryParse(
+                $candidateDeferDeadline,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::AllowWhiteSpaces,
+                [ref]$parsedDeferDeadline
+            )) {
+            throw 'PSADT deferDeadline must be a valid ISO date or date-time string.'
+        }
+        $deferDeadline = $candidateDeferDeadline
+    }
+}
+$deferDays = $null
+if ($psadtConfig.ContainsKey('deferDays') -and $null -ne $psadtConfig.deferDays) {
+    $parsedDeferDays = 0.0
+    if (-not [double]::TryParse(
+            [string]$psadtConfig.deferDays,
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsedDeferDays
+        ) -or $parsedDeferDays -lt 0 -or $parsedDeferDays -gt 3650) {
+        throw 'PSADT deferDays must be a number from 0 through 3650.'
+    }
+    $deferDays = [Convert]::ToString($parsedDeferDays, [System.Globalization.CultureInfo]::InvariantCulture)
+}
+$forceCloseCountdown = $null
+if ($psadtConfig.ContainsKey('forceCloseProcessesCountdown') -and
+    $null -ne $psadtConfig.forceCloseProcessesCountdown) {
+    $parsedForceCloseCountdown = 0L
+    if (-not [long]::TryParse([string]$psadtConfig.forceCloseProcessesCountdown, [ref]$parsedForceCloseCountdown) -or
+        $parsedForceCloseCountdown -lt 0 -or $parsedForceCloseCountdown -gt 86400) {
+        throw 'PSADT forceCloseProcessesCountdown must be an integer from 0 through 86400.'
+    }
+    $forceCloseCountdown = [int]$parsedForceCloseCountdown
+}
+$persistPrompt = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'persistPrompt'
+$minimizeWindows = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'minimizeWindows'
+$windowLocation = if ($psadtConfig.windowLocation) { [string]$psadtConfig.windowLocation } else { 'Default' }
+if ($windowLocation -notin @('Default', 'Center', 'Top', 'Bottom', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight')) {
+    throw "Unsupported PSADT windowLocation [$windowLocation]."
+}
+$checkDiskSpace = Get-StrictPSADTBoolean -Config $psadtConfig -Name 'checkDiskSpace'
+$requiredDiskSpace = $null
+if ($psadtConfig.ContainsKey('requiredDiskSpace') -and $null -ne $psadtConfig.requiredDiskSpace) {
+    $parsedRequiredDiskSpace = 0L
+    if (-not [long]::TryParse([string]$psadtConfig.requiredDiskSpace, [ref]$parsedRequiredDiskSpace) -or
+        $parsedRequiredDiskSpace -lt 0 -or $parsedRequiredDiskSpace -gt [uint32]::MaxValue) {
+        throw 'PSADT requiredDiskSpace must be an unsigned 32-bit integer.'
+    }
+    $requiredDiskSpace = [long]$parsedRequiredDiskSpace
+}
 $welcomeTitle = if ([string]::IsNullOrWhiteSpace($brandingWelcomeTitle)) { "$displayNameEscaped Installation" } else { $brandingWelcomeTitle -replace "'", "''" -replace '`', '``' -replace '\$', '`$' }
 $welcomeMessageEscaped = if ($brandingWelcomeMessage) { $brandingWelcomeMessage -replace "'", "''" -replace '`', '``' -replace '\$', '`$' } else { '' }
 $welcomeMessageEscaped = $welcomeMessageEscaped -replace "`r`n", "`r`n"
@@ -661,9 +795,8 @@ if ($processesToClose.Count -gt 0) {
     Write-Host "  - $($processesToClose | ForEach-Object { $_.name } | Join-String -Separator ', ')"
 }
 
-# Build processes array as separate script-level variable
+# Build the PSADT v4.1 AppProcessesToClose session value.
 $processesArrayStr = '@()'
-$processesVarBlock = ''
 if ($processesToClose.Count -gt 0) {
     $processEntries = $processesToClose | ForEach-Object {
         $procName = $_.name -replace "'", "''"
@@ -671,51 +804,89 @@ if ($processesToClose.Count -gt 0) {
         "@{ Name = '$procName'; Description = '$procDesc' }"
     }
     $processesArrayStr = "@(`n    $($processEntries -join ",`n    ")`n)"
-    $processesVarBlock = "`$script:ProcessesToClose = $processesArrayStr"
 }
 
 # Build Show-ADTInstallationWelcome call if enabled
 $welcomeCall = ''
-if ($allowDefer -or ($showClosePrompt -and $processesToClose.Count -gt 0) -or $blockExecution -or $checkDiskSpace) {
+if ($allowDefer -or $processesToClose.Count -gt 0 -or $checkDiskSpace) {
     $welcomeParams = @()
-
-    if (-not [string]::IsNullOrWhiteSpace($welcomeMessageEscaped)) {
-        $welcomeParams += '-CustomText'
-    }
+    $interactiveWelcome = $allowDefer -or ($processesToClose.Count -gt 0 -and $showClosePrompt)
 
     # Handle parameter sets correctly for PSADT v4
-    # When both deferrals AND close prompts are enabled, use -AllowDeferCloseProcesses
+    # Deferral is interactive even when showClosePrompt is false because the
+    # user must be able to choose whether to defer.
     if ($processesToClose.Count -gt 0 -and $allowDefer) {
-        $welcomeParams += '-CloseProcesses $script:ProcessesToClose'
+        $welcomeParams += '-CloseProcesses $adtSession.AppProcessesToClose'
         $welcomeParams += '-AllowDeferCloseProcesses'
-        $welcomeParams += "-ForceCloseProcessesCountdown $closeCountdown"
+        if ($null -ne $forceCloseCountdown) {
+            $welcomeParams += "-ForceCloseProcessesCountdown $forceCloseCountdown"
+        } else {
+            $welcomeParams += "-CloseProcessesCountdown $closeCountdown"
+        }
         $welcomeParams += "-DeferTimes $deferTimes"
+        if ($deferDeadline) { $welcomeParams += "-DeferDeadline '$deferDeadline'" }
+        if ($null -ne $deferDays) { $welcomeParams += "-DeferDays $deferDays" }
         if ($blockExecution) { $welcomeParams += '-BlockExecution' }
     } elseif ($processesToClose.Count -gt 0) {
-        # Only close prompts, no deferrals
-        $welcomeParams += '-CloseProcesses $script:ProcessesToClose'
-        $welcomeParams += "-CloseProcessesCountdown $closeCountdown"
+        $welcomeParams += '-CloseProcesses $adtSession.AppProcessesToClose'
+        if ($showClosePrompt) {
+            if ($null -ne $forceCloseCountdown) {
+                $welcomeParams += "-ForceCloseProcessesCountdown $forceCloseCountdown"
+            } else {
+                $welcomeParams += "-CloseProcessesCountdown $closeCountdown"
+            }
+        } else {
+            $welcomeParams += '-Silent'
+        }
         if ($blockExecution) { $welcomeParams += '-BlockExecution' }
     } elseif ($allowDefer) {
         # Only deferrals, no close prompts
         $welcomeParams += '-AllowDefer'
         $welcomeParams += "-DeferTimes $deferTimes"
         if ($deferDeadline) { $welcomeParams += "-DeferDeadline '$deferDeadline'" }
-        if ($deferDays) { $welcomeParams += "-DeferDays $deferDays" }
+        if ($null -ne $deferDays) { $welcomeParams += "-DeferDays $deferDays" }
     }
-    if ($forceCloseCountdown) { $welcomeParams += "-ForceCloseProcessesCountdown $forceCloseCountdown" }
-    if ($persistPrompt) { $welcomeParams += '-PersistPrompt' }
-    if ($minimizeWindows) { $welcomeParams += '-MinimizeWindows' }
-    if ($windowLocation -ne 'Default') { $welcomeParams += "-WindowLocation '$windowLocation'" }
+    if ($interactiveWelcome) {
+        if (-not [string]::IsNullOrWhiteSpace($welcomeMessageEscaped)) { $welcomeParams += '-CustomText' }
+        if ($promptToSave -and $processesToClose.Count -gt 0) { $welcomeParams += '-PromptToSave' }
+        if ($persistPrompt) { $welcomeParams += '-PersistPrompt' }
+        if ($minimizeWindows) { $welcomeParams += '-MinimizeWindows' }
+        if ($windowLocation -ne 'Default') { $welcomeParams += "-WindowLocation '$windowLocation'" }
+    }
     if ($checkDiskSpace) {
         $welcomeParams += '-CheckDiskSpace'
-        if ($requiredDiskSpace) { $welcomeParams += "-RequiredDiskSpace $requiredDiskSpace" }
+        if ($null -ne $requiredDiskSpace) { $welcomeParams += "-RequiredDiskSpace $requiredDiskSpace" }
     }
 
     $welcomeCall = @(
         ''
         '    # Show installation welcome dialog (for deferrals and/or close prompts)'
         "    Show-ADTInstallationWelcome $($welcomeParams -join ' ')"
+        ''
+    ) -join "`r`n"
+}
+
+$uninstallWelcomeCall = ''
+if ($processesToClose.Count -gt 0) {
+    $uninstallWelcomeParameters = @('-CloseProcesses $adtSession.AppProcessesToClose')
+    if ($showClosePrompt) {
+        if ($null -ne $forceCloseCountdown) {
+            $uninstallWelcomeParameters += "-ForceCloseProcessesCountdown $forceCloseCountdown"
+        } else {
+            $uninstallWelcomeParameters += "-CloseProcessesCountdown $closeCountdown"
+        }
+        if ($promptToSave) { $uninstallWelcomeParameters += '-PromptToSave' }
+        if ($persistPrompt) { $uninstallWelcomeParameters += '-PersistPrompt' }
+        if ($minimizeWindows) { $uninstallWelcomeParameters += '-MinimizeWindows' }
+        if ($windowLocation -ne 'Default') { $uninstallWelcomeParameters += "-WindowLocation '$windowLocation'" }
+    } else {
+        $uninstallWelcomeParameters += '-Silent'
+    }
+    if ($blockExecution) { $uninstallWelcomeParameters += '-BlockExecution' }
+    $uninstallWelcomeCall = @(
+        ''
+        '    # Apply the PSADT v4.1 application process lifecycle before removal.'
+        "    Show-ADTInstallationWelcome $($uninstallWelcomeParameters -join ' ')"
         ''
     ) -join "`r`n"
 }
@@ -969,9 +1140,6 @@ $lines = @(
     '## MARK: Variables'
     '##================================================'
     ''
-    "# Processes to close before installation"
-    "$processesVarBlock"
-    ''
     '$adtSession = @{'
     "    AppVendor = '$publisherEscaped'"
     "    AppName = '$displayNameEscaped'"
@@ -981,6 +1149,7 @@ $lines = @(
     '    AppRevision = ''01'''
     "    AppSuccessExitCodes = @($appSuccessExitCodesLiteral)"
     '    AppRebootExitCodes = @(1641, 3010)'
+    "    AppProcessesToClose = $processesArrayStr"
     '    AppScriptVersion = ''1.0.0'''
     '    AppScriptDate = (Get-Date -Format ''yyyy-MM-dd'')'
     '    AppScriptAuthor = ''IntuneGet'''
@@ -1541,6 +1710,10 @@ $lines += @(
     '    [CmdletBinding()]'
     '    param ()'
 )
+
+if ($uninstallWelcomeCall) {
+    $lines += $uninstallWelcomeCall
+}
 
 # Add pre-uninstall prompts
 if ($preUninstallPromptCalls) {

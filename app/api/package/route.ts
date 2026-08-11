@@ -37,6 +37,7 @@ import {
   InstallerPreflightError,
 } from '@/lib/installer-preflight';
 import { ensureQaDemand } from '@/lib/qa/demand';
+import { applyApplicationPackagingAdapter } from '@/lib/packaging-adapters';
 
 export const maxDuration = 300;
 
@@ -395,6 +396,12 @@ export async function POST(request: NextRequest) {
         // Phase 1: Create all win32 job records
         for (const item of win32Items) {
           try {
+            if (item.sourceType !== 'custom') {
+              item.psadtConfig = applyApplicationPackagingAdapter(
+                item.wingetId,
+                item.psadtConfig
+              );
+            }
             const jobId = crypto.randomUUID();
             const installerSha256 = item.installerSha256?.trim() || '';
             const qaDemand = item.sourceType === 'custom'
