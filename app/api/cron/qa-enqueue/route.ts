@@ -16,6 +16,7 @@ import {
 } from '@/lib/qa/candidate';
 import { buildQaCatalogTestConfig } from '@/lib/qa/test-config';
 import { evaluatePackagingContract } from '@/lib/packaging-contract';
+import { resolveWingetPackageDependencies } from '@/lib/winget-dependencies';
 import {
   QA_PSADT_TOOLCHAIN,
   buildQaPackageIdentity,
@@ -563,6 +564,16 @@ export async function GET(request: Request) {
               manifest,
               installer: selectedForVm.installer as never,
             });
+            const packageDependencies = await resolveWingetPackageDependencies({
+              wingetId: app.winget_id,
+              version: resolution.version,
+              architecture,
+              installerSha256,
+              installScope: testConfig.scope,
+            });
+            if (packageDependencies.length > 0) {
+              testConfig.packageDependencies = packageDependencies;
+            }
             const packageIdentity = buildQaPackageIdentity({
               profileKind: testConfig.profileKind,
               wingetId: app.winget_id,
@@ -580,6 +591,7 @@ export async function GET(request: Request) {
               nestedInstallerFiles: testConfig.nestedInstallerFiles,
               psadtConfig: testConfig.psadtConfig,
               detectionRules: testConfig.detectionRules,
+              packageDependencies,
             });
             const packagingContract = evaluatePackagingContract({
               wingetId: app.winget_id,
