@@ -290,7 +290,40 @@ describe('PSADT registry uninstall identity contract', () => {
     expect(packager).toContain(
       '$bundleCandidates = @($changedApplications | Where-Object { -not $_.WindowsInstaller })'
     );
+    expect(packager).toContain(
+      '$bundleCandidates = @($selectedApplications | Where-Object {'
+    );
+    expect(packager).toContain(
+      '$isVisibleApplication -and -not $_.WindowsInstaller'
+    );
   });
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'narrows an ambiguous Burn display-name match to the single bundle entry',
+    () => {
+      const generated = generateRegistryUninstallPackage('burn', 'PreForm');
+
+      expect(generated).toContain('if ($selectedApplications.Count -gt 1)');
+      expect(generated).toContain(
+        '$bundleCandidates = @($selectedApplications | Where-Object {'
+      );
+      expect(generated).toContain('$isVisibleApplication -and -not $_.WindowsInstaller');
+      expect(generated.indexOf('if ($selectedApplications.Count -gt 1)')).toBeLessThan(
+        generated.indexOf('if ($selectedApplications.Count -eq 1) { break }')
+      );
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'does not emit Burn-only duplicate-entry narrowing for non-Burn packages',
+    () => {
+      const generated = generateRegistryUninstallPackage('inno', 'Example App');
+
+      expect(generated).not.toContain(
+        'A Burn bundle and its chained MSI can intentionally share the same ARP display name.'
+      );
+    }
+  );
 
   it.runIf(canRunWindowsPowerShellPackager)(
     'does not leak generator-only installer type state into generated scripts',
@@ -302,6 +335,10 @@ describe('PSADT registry uninstall identity contract', () => {
       expect(burnGenerated).not.toContain('$originalInstallerType');
       expect(burnGenerated).toContain(
         '$bundleCandidates = @($changedApplications | Where-Object { -not $_.WindowsInstaller })'
+      );
+      expect(burnGenerated).toContain('$isVisibleApplication -and -not $_.WindowsInstaller');
+      expect(burnGenerated).toContain(
+        'A Burn bundle and its chained MSI can intentionally share the same ARP display name.'
       );
     }
   );

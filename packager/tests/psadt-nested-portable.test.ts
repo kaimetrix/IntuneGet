@@ -327,6 +327,50 @@ describe('Burn bundle PSADT generation', () => {
     expect(script).toContain('foreach ($verificationAttempt in 1..5)');
     expect(script).not.toContain("Start-ADTMsiProcess -Action 'Uninstall'");
   });
+
+  it('narrows duplicate bundle and chained-MSI display names to the bundle entry', () => {
+    const job = packagingJob({
+      winget_id: 'Formlabs.PreForm',
+      display_name: 'PreForm',
+      installer_type: 'burn',
+      uninstall_command: 'REGISTRY_UNINSTALL:PreForm',
+    });
+
+    const verification = generator.getPostInstallVerificationBlock.call(
+      generator,
+      job,
+      'PreForm'
+    );
+
+    expect(verification).toContain(
+      "if ($selectedApplications.Count -gt 1 -and 'burn' -eq 'burn')"
+    );
+    expect(verification).toContain(
+      '$bundleCandidates = @($selectedApplications | Where-Object {'
+    );
+    expect(verification).toContain('$isVisibleApplication -and -not $_.WindowsInstaller');
+    expect(verification.indexOf('$selectedApplications.Count -gt 1')).toBeLessThan(
+      verification.indexOf('$selectedApplications.Count -eq 1) { break }')
+    );
+  });
+
+  it('keeps Burn-only duplicate-entry narrowing disabled for non-Burn packages', () => {
+    const job = packagingJob({
+      installer_type: 'inno',
+      uninstall_command: 'REGISTRY_UNINSTALL:Example App',
+    });
+
+    const verification = generator.getPostInstallVerificationBlock.call(
+      generator,
+      job,
+      'Example App'
+    );
+
+    expect(verification).toContain("$selectedApplications.Count -gt 1 -and 'inno' -eq 'burn'");
+    expect(verification).not.toContain(
+      "$selectedApplications.Count -gt 1 -and 'inno' -eq 'inno'"
+    );
+  });
 });
 
 describe('EXE product identity PSADT generation', () => {

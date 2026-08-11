@@ -1009,6 +1009,16 @@ ${steps}
             })
             if ($bundleCandidates.Count -eq 1) { $selectedApplications = $bundleCandidates }
         }
+        if ($selectedApplications.Count -gt 1 -and '${job.installer_type.toLowerCase()}' -eq 'burn') {
+            # A Burn bundle and its chained MSI can intentionally share the same ARP display name.
+            # Narrow only the already identity-matched set to its single non-MSI bundle entry.
+            $bundleCandidates = @($selectedApplications | Where-Object {
+                $systemComponentProperty = $_.PSObject.Properties['SystemComponent']
+                $isVisibleApplication = -not $systemComponentProperty -or -not [bool]$systemComponentProperty.Value
+                $isVisibleApplication -and -not $_.WindowsInstaller
+            })
+            if ($bundleCandidates.Count -eq 1) { $selectedApplications = $bundleCandidates }
+        }
         if ($selectedApplications.Count -eq 0 -and '${job.installer_type.toLowerCase()}' -eq 'burn') {
             $bundleCandidates = @($changedApplications | Where-Object { -not $_.WindowsInstaller })
             if ($bundleCandidates.Count -eq 1) { $selectedApplications = $bundleCandidates }
