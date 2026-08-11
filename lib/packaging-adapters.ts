@@ -13,6 +13,22 @@ interface ApplicationPackagingAdapter {
  */
 export const APPLICATION_PACKAGING_ADAPTERS: readonly ApplicationPackagingAdapter[] = [
   {
+    wingetId: 'Adobe.CreativeCloud',
+    requiredProcessesToClose: [
+      { name: 'Creative Cloud', description: 'Adobe Creative Cloud' },
+      { name: 'AdobeDesktopService', description: 'Adobe Desktop Service' },
+      { name: 'AdobeCEFHelper', description: 'Adobe CEF Helper' },
+      { name: 'AdobeInstaller', description: 'Adobe Installer' },
+      { name: 'AdobeUpdateService', description: 'Adobe Update Service' },
+      { name: 'CCLibrary', description: 'Adobe Creative Cloud Library' },
+      { name: 'CCXProcess', description: 'Adobe Creative Cloud Experience' },
+      { name: 'CoreSync', description: 'Adobe CoreSync' },
+      { name: 'AdobeIPCBroker', description: 'Adobe IPC Broker' },
+      { name: 'AdobeNotificationClient', description: 'Adobe Notification Client' },
+      { name: 'CreativeCloudHelper', description: 'Adobe Creative Cloud Helper' },
+    ],
+  },
+  {
     wingetId: 'Elgato.StreamDeck',
     requiredProcessesToClose: [
       { name: 'StreamDeck', description: 'Elgato Stream Deck' },

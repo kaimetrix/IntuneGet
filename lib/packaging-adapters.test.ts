@@ -3,6 +3,42 @@ import { DEFAULT_PSADT_CONFIG } from '@/types/psadt';
 import { applyApplicationPackagingAdapter } from './packaging-adapters';
 
 describe('application packaging adapters', () => {
+  it('closes the reviewed Adobe desktop processes before Creative Cloud removal', () => {
+    const adapted = applyApplicationPackagingAdapter(
+      'Adobe.CreativeCloud',
+      DEFAULT_PSADT_CONFIG
+    );
+
+    expect(adapted.processesToClose).toEqual([
+      { name: 'Creative Cloud', description: 'Adobe Creative Cloud' },
+      { name: 'AdobeDesktopService', description: 'Adobe Desktop Service' },
+      { name: 'AdobeCEFHelper', description: 'Adobe CEF Helper' },
+      { name: 'AdobeInstaller', description: 'Adobe Installer' },
+      { name: 'AdobeUpdateService', description: 'Adobe Update Service' },
+      { name: 'CCLibrary', description: 'Adobe Creative Cloud Library' },
+      { name: 'CCXProcess', description: 'Adobe Creative Cloud Experience' },
+      { name: 'CoreSync', description: 'Adobe CoreSync' },
+      { name: 'AdobeIPCBroker', description: 'Adobe IPC Broker' },
+      { name: 'AdobeNotificationClient', description: 'Adobe Notification Client' },
+      { name: 'CreativeCloudHelper', description: 'Adobe Creative Cloud Helper' },
+    ]);
+  });
+
+  it('preserves a customer Adobe process description while filling missing lifecycle entries', () => {
+    const adapted = applyApplicationPackagingAdapter('Adobe.CreativeCloud', {
+      ...DEFAULT_PSADT_CONFIG,
+      processesToClose: [
+        { name: 'Creative Cloud.exe', description: 'Customer-managed sync client' },
+      ],
+    });
+
+    expect(adapted.processesToClose[0]).toEqual({
+      name: 'Creative Cloud',
+      description: 'Customer-managed sync client',
+    });
+    expect(adapted.processesToClose).toHaveLength(11);
+  });
+
   it('adds the reviewed Stream Deck lifecycle process to the exact app', () => {
     const adapted = applyApplicationPackagingAdapter(
       'Elgato.StreamDeck',

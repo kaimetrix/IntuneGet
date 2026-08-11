@@ -352,4 +352,38 @@ describe('buildQaCatalogTestConfig', () => {
       { name: 'StreamDeck', description: 'Elgato Stream Deck' },
     ]);
   });
+
+  it('includes the reviewed Creative Cloud process adapter in the catalog profile', () => {
+    const config = buildQaCatalogTestConfig({
+      app: {
+        wingetId: 'Adobe.CreativeCloud',
+        name: 'Adobe Creative Cloud',
+        publisher: 'Adobe',
+        version: '6.10.0.252.3',
+      },
+      manifest: {
+        InstallerType: 'exe',
+        Scope: 'machine',
+      },
+      installer: {
+        Architecture: 'x86',
+        InstallerType: 'exe',
+        InstallerSwitches: { Silent: '--mode=stub' },
+      },
+    });
+
+    expect(config.psadtConfig.processesToClose.map(({ name }) => name)).toEqual([
+      'Creative Cloud',
+      'AdobeDesktopService',
+      'AdobeCEFHelper',
+      'AdobeInstaller',
+      'AdobeUpdateService',
+      'CCLibrary',
+      'CCXProcess',
+      'CoreSync',
+      'AdobeIPCBroker',
+      'AdobeNotificationClient',
+      'CreativeCloudHelper',
+    ]);
+  });
 });
