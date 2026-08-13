@@ -14,6 +14,12 @@ interface ApplicationPackagingAdapter {
   }>;
   uninstallCompletionTimeoutMinutes?: number;
   preserveVendorInstallationOnUninstall?: boolean;
+  reviewedManagedInstallDirectory?: string;
+  reviewedManagedUninstall?: Readonly<{
+    executablePath: string;
+    arguments: readonly string[];
+    completionTimeoutMinutes: number;
+  }>;
   reviewedMultiProductInstallDisplayNamePrefixes?: readonly string[];
   reviewedMultiProductInstallMinimumCount?: number;
 }
@@ -99,7 +105,41 @@ export const APPLICATION_PACKAGING_ADAPTERS: readonly ApplicationPackagingAdapte
     requiredProcessesToClose: [
       { name: 'opera', description: 'Opera browser' },
     ],
-    reviewedUninstallArguments: ['--runimmediately'],
+    // State the profile-retention choice explicitly. Current Opera builds can
+    // otherwise hand the SYSTEM uninstall to setup.exe without resolving the
+    // profile prompt, leaving the product registration behind.
+    reviewedUninstallArguments: ['--runimmediately', '--deleteuserprofile=0'],
+  },
+  {
+    // The Office Deployment Tool is a self-extracting payload, not an
+    // installed application. It intentionally creates no ARP registration.
+    // WinGet extracts it to this machine-wide directory, so verify that exact
+    // payload and remove it directly instead of capturing an unrelated ARP
+    // change made by Windows servicing during the extraction.
+    wingetId: 'Microsoft.OfficeDeploymentTool',
+    reviewedManagedInstallDirectory: '%ProgramW6432%\\OfficeDeploymentTool',
+  },
+  {
+    // Visual Studio 2026 instances are owned by the Visual Studio Installer,
+    // which intentionally creates several component registrations rather than
+    // one ARP entry named after the bootstrapper. Use Microsoft's documented
+    // instance path and setup.exe lifecycle instead of guessing among those
+    // registrations.
+    wingetId: 'Microsoft.VisualStudio.BuildTools',
+    reviewedManagedInstallDirectory:
+      '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
+    reviewedManagedUninstall: {
+      executablePath:
+        '%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe',
+      arguments: [
+        'uninstall',
+        '--installPath',
+        '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
+        '--quiet',
+        '--norestart',
+      ],
+      completionTimeoutMinutes: 15,
+    },
   },
   {
     // EA Desktop's registered EAUninstall.exe helper is unattended, but it
@@ -288,7 +328,9 @@ export function applyApplicationPackagingAdapter(
       !config.preserveVendorInstallationOnUninstall &&
       !config.reviewedMultiProductInstallDisplayNamePrefixes &&
       !config.reviewedMultiProductInstallMinimumCount &&
-      !config.reviewedUninstallProcessGuard
+      !config.reviewedUninstallProcessGuard &&
+      !config.reviewedManagedInstallDirectory &&
+      !config.reviewedManagedUninstall
     ) return config;
     return {
       ...config,
@@ -296,6 +338,8 @@ export function applyApplicationPackagingAdapter(
       reviewedMultiProductInstallDisplayNamePrefixes: undefined,
       reviewedMultiProductInstallMinimumCount: undefined,
       reviewedUninstallProcessGuard: undefined,
+      reviewedManagedInstallDirectory: undefined,
+      reviewedManagedUninstall: undefined,
     };
   }
 
@@ -364,6 +408,16 @@ export function applyApplicationPackagingAdapter(
       : {}),
     preserveVendorInstallationOnUninstall:
       adapter.preserveVendorInstallationOnUninstall || undefined,
+    reviewedManagedInstallDirectory:
+      adapter.reviewedManagedInstallDirectory || undefined,
+    reviewedManagedUninstall: adapter.reviewedManagedUninstall
+      ? {
+          executablePath: adapter.reviewedManagedUninstall.executablePath,
+          arguments: [...adapter.reviewedManagedUninstall.arguments],
+          completionTimeoutMinutes:
+            adapter.reviewedManagedUninstall.completionTimeoutMinutes,
+        }
+      : undefined,
     reviewedMultiProductInstallDisplayNamePrefixes,
     reviewedMultiProductInstallMinimumCount:
       adapter.reviewedMultiProductInstallMinimumCount,

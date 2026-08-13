@@ -310,6 +310,96 @@ describe('PSADT vendor argument contract', () => {
     }
   );
 
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'verifies and removes a reviewed self-extracted managed directory without ARP capture',
+    () => {
+      const generated = generateRegistryUninstallPackage(
+        'inno',
+        'Office Deployment Tool',
+        [],
+        { reviewedManagedInstallDirectory: '%ProgramW6432%\\OfficeDeploymentTool' },
+        [],
+        'Microsoft.OfficeDeploymentTool'
+      );
+      const installFunction = generated.slice(
+        generated.indexOf('function Install-ADTDeployment'),
+        generated.indexOf('function Uninstall-ADTDeployment')
+      );
+      const uninstallFunction = generated.slice(
+        generated.indexOf('function Uninstall-ADTDeployment'),
+        generated.indexOf('function Repair-ADTDeployment')
+      );
+
+      expect(installFunction).toContain(
+        "[Environment]::ExpandEnvironmentVariables('%ProgramW6432%\\OfficeDeploymentTool')"
+      );
+      expect(installFunction).toContain('Verified managed extracted payload');
+      expect(installFunction).not.toContain('Captured vendor uninstall entry');
+      expect(uninstallFunction).toContain('Remove-Item -LiteralPath $managedInstallDirectory');
+      expect(uninstallFunction).not.toContain('Waiting for vendor uninstall registration');
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'rejects an unsafe reviewed managed install directory',
+    () => {
+      expect(() =>
+        generateRegistryUninstallPackage(
+          'inno',
+          'Unsafe Extractor',
+          [],
+          { reviewedManagedInstallDirectory: '%ProgramFiles%\\..\\Windows' }
+        )
+      ).toThrow('must be a safe path below a Program Files environment variable');
+    }
+  );
+
+  it.runIf(canRunWindowsPowerShellPackager)(
+    'uses a reviewed vendor command for a managed installation instance',
+    () => {
+      const generated = generateRegistryUninstallPackage(
+        'inno',
+        'Visual Studio BuildTools 2026',
+        [],
+        {
+          reviewedManagedInstallDirectory:
+            '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
+          reviewedManagedUninstall: {
+            executablePath:
+              '%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe',
+            arguments: [
+              'uninstall',
+              '--installPath',
+              '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
+              '--quiet',
+              '--norestart',
+            ],
+            completionTimeoutMinutes: 15,
+          },
+        },
+        [],
+        'Microsoft.VisualStudio.BuildTools'
+      );
+      const uninstallFunction = generated.slice(
+        generated.indexOf('function Uninstall-ADTDeployment'),
+        generated.indexOf('function Repair-ADTDeployment')
+      );
+
+      expect(uninstallFunction).toContain(
+        "[Environment]::ExpandEnvironmentVariables('%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe')"
+      );
+      expect(uninstallFunction).toContain(
+        "$managedUninstallArguments = @('uninstall', '--installPath', '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools', '--quiet', '--norestart')"
+      );
+      expect(uninstallFunction).toContain(
+        '$managedUninstallDeadline = [DateTime]::UtcNow.AddMinutes(15)'
+      );
+      expect(uninstallFunction).not.toContain(
+        'Remove-Item -LiteralPath $managedInstallDirectory'
+      );
+    }
+  );
+
   it('honors additional success exit codes declared by the WinGet manifest', () => {
     if (!canRunWindowsPowerShellPackager) return;
     const generated = generateRegistryUninstallPackage(
