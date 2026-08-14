@@ -336,6 +336,71 @@ describe('PSADT QA package identity', () => {
     expect(profile.installer.uninstallCommand).toBe('REGISTRY_UNINSTALL:Google Chrome');
   });
 
+  it('binds Maestro 2025 embedded-MSI identity to customer and QA packaging', () => {
+    const normalized = normalizeQaWorkflowPackageInput({
+      wingetId: 'MaestroSoft.MaestroAarsoppgjoer.2025',
+      displayName: 'Maestro Årsoppgjør 2025',
+      publisher: 'MaestroSoft',
+      version: '38.05.21',
+      architecture: 'x86',
+      installerSha256: 'b'.repeat(64),
+      installerType: 'exe',
+      silentSwitches: '/s',
+      uninstallCommand: 'REGISTRY_UNINSTALL:Maestro Årsoppgjør 2025',
+      installScope: 'machine',
+      detectionRules: '[]',
+      psadtConfig: JSON.stringify({ detectionRules: [] }),
+    });
+    const expected =
+      'REGISTRY_UNINSTALL_KEY:{20C36C0E-AF6D-4C46-AA1C-39080889BE9F}:Maestro Årsoppgjør 2025';
+    const profile = normalized.identity.profile as {
+      installer: { uninstallCommand: string };
+    };
+
+    expect(normalized.uninstallCommand).toBe(expected);
+    expect(profile.installer.uninstallCommand).toBe(expected);
+  });
+
+  it('binds the Visual Studio 2019 instance lifecycle to customer and QA packaging', () => {
+    const normalized = normalizeQaWorkflowPackageInput({
+      wingetId: 'Microsoft.VisualStudio.2019.BuildTools',
+      displayName: 'Visual Studio BuildTools 2019',
+      publisher: 'Microsoft',
+      version: '16.11.59',
+      architecture: 'x64',
+      installerSha256: 'b'.repeat(64),
+      installerType: 'exe',
+      silentSwitches: '--quiet --wait --campaign "winget"',
+      uninstallCommand: 'REGISTRY_UNINSTALL:Visual Studio BuildTools 2019',
+      installScope: 'machine',
+      detectionRules: '[]',
+      psadtConfig: JSON.stringify({ detectionRules: [] }),
+    });
+    const expectedPath =
+      '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2019\\BuildTools';
+    const expectedConfig = {
+      reviewedManagedInstallDirectory: expectedPath,
+      reviewedManagedUninstall: {
+        executablePath:
+          '%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe',
+        arguments: [
+          'uninstall',
+          '--installPath',
+          expectedPath,
+          '--quiet',
+          '--norestart',
+        ],
+        completionTimeoutMinutes: 15,
+      },
+    };
+    const profile = normalized.identity.profile as {
+      psadtConfig: typeof expectedConfig;
+    };
+
+    expect(JSON.parse(normalized.psadtConfigJson)).toMatchObject(expectedConfig);
+    expect(profile.psadtConfig).toMatchObject(expectedConfig);
+  });
+
   it('binds shared-runtime retention to both the normalized config and QA identity', () => {
     const normalized = normalizeQaWorkflowPackageInput({
       wingetId: 'Microsoft.EdgeWebView2Runtime',

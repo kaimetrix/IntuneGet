@@ -43,20 +43,32 @@ const POSTGRESQL_PACKAGING_ADAPTER: ApplicationPackagingAdapter = {
   ],
 };
 
-const VISUAL_STUDIO_WINGET_IDS = [
-  'Microsoft.VisualStudio.BuildTools',
-  'Microsoft.VisualStudio.Community',
-  'Microsoft.VisualStudio.Enterprise',
-  'Microsoft.VisualStudio.Professional',
-  'Microsoft.VisualStudio.2019.BuildTools',
-  'Microsoft.VisualStudio.2019.Community',
-  'Microsoft.VisualStudio.2019.Enterprise',
-  'Microsoft.VisualStudio.2019.Professional',
-  'Microsoft.VisualStudio.2022.BuildTools',
-  'Microsoft.VisualStudio.2022.Community',
-  'Microsoft.VisualStudio.2022.Enterprise',
-  'Microsoft.VisualStudio.2022.Professional',
-] as const;
+const VISUAL_STUDIO_MANAGED_INSTALL_PATHS = {
+  'Microsoft.VisualStudio.BuildTools':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
+  'Microsoft.VisualStudio.Community':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\Community',
+  'Microsoft.VisualStudio.Enterprise':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\Enterprise',
+  'Microsoft.VisualStudio.Professional':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\Professional',
+  'Microsoft.VisualStudio.2019.BuildTools':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2019\\BuildTools',
+  'Microsoft.VisualStudio.2019.Community':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2019\\Community',
+  'Microsoft.VisualStudio.2019.Enterprise':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2019\\Enterprise',
+  'Microsoft.VisualStudio.2019.Professional':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2019\\Professional',
+  'Microsoft.VisualStudio.2022.BuildTools':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2022\\BuildTools',
+  'Microsoft.VisualStudio.2022.Community':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2022\\Community',
+  'Microsoft.VisualStudio.2022.Enterprise':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2022\\Enterprise',
+  'Microsoft.VisualStudio.2022.Professional':
+    '%ProgramFiles(x86)%\\Microsoft Visual Studio\\2022\\Professional',
+} as const;
 
 const SSMS_VISUAL_STUDIO_INSTALLER_WINGET_IDS = [
   'Microsoft.SQLServerManagementStudio.21',
@@ -250,25 +262,19 @@ export const APPLICATION_PACKAGING_ADAPTERS: readonly ApplicationPackagingAdapte
     reviewedManagedInstallDirectory: '%SystemDrive%\\SWSetup\\HPImageAssistant',
   },
   {
-    // Visual Studio 2026 instances are owned by the Visual Studio Installer,
-    // which intentionally creates several component registrations rather than
-    // one ARP entry named after the bootstrapper. Use Microsoft's documented
-    // instance path and setup.exe lifecycle instead of guessing among those
-    // registrations.
-    wingetId: 'Microsoft.VisualStudio.BuildTools',
+    // Google Updater is a shared system updater, not a conventional ARP app.
+    // Its enterprise installer can update an existing registration without
+    // creating a new uninstall entry, so ARP delta capture is not a reliable
+    // lifecycle identity. Verify Google's machine-wide payload and invoke the
+    // documented versioned updater command during managed removal.
+    wingetId: 'Google.GoogleUpdater',
     reviewedManagedInstallDirectory:
-      '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
+      '%ProgramFiles(x86)%\\Google\\GoogleUpdater',
     reviewedManagedUninstall: {
       executablePath:
-        '%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe',
-      arguments: [
-        'uninstall',
-        '--installPath',
-        '%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools',
-        '--quiet',
-        '--norestart',
-      ],
-      completionTimeoutMinutes: 15,
+        '%ProgramFiles(x86)%\\Google\\GoogleUpdater\\<VERSION>\\updater.exe',
+      arguments: ['--uninstall', '--system'],
+      completionTimeoutMinutes: 5,
     },
   },
   {
@@ -335,15 +341,28 @@ export const APPLICATION_PACKAGING_ADAPTERS: readonly ApplicationPackagingAdapte
     ],
     reviewedMultiProductInstallMinimumCount: 10,
   },
-  ...VISUAL_STUDIO_WINGET_IDS.map((wingetId) => ({
-    wingetId,
-    reviewedUninstallArguments: ['--quiet', '--norestart'],
-    // Visual Studio's registered setup.exe command returns before its child
-    // installer engine has removed the exact product registration. Microsoft
-    // documents --wait for the bootstrapper only, not setup.exe, so retain
-    // registry-aware completion polling for this longer vendor lifecycle.
-    uninstallCompletionTimeoutMinutes: 15,
-  })),
+  ...Object.entries(VISUAL_STUDIO_MANAGED_INSTALL_PATHS).map(
+    ([wingetId, installPath]) => ({
+      // Visual Studio Installer instances create several component records,
+      // not one reliable ARP delta named after the bootstrapper. Verify the
+      // exact edition directory and use Microsoft's setup.exe instance
+      // lifecycle for every supported Visual Studio generation and edition.
+      wingetId,
+      reviewedManagedInstallDirectory: installPath,
+      reviewedManagedUninstall: {
+        executablePath:
+          '%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\setup.exe',
+        arguments: [
+          'uninstall',
+          '--installPath',
+          installPath,
+          '--quiet',
+          '--norestart',
+        ],
+        completionTimeoutMinutes: 15,
+      },
+    })
+  ),
   ...SSMS_VISUAL_STUDIO_INSTALLER_WINGET_IDS.map((wingetId) => ({
     wingetId,
     // SSMS 21+ is serviced by the Visual Studio Installer. Its setup.exe
@@ -445,6 +464,15 @@ const REVIEWED_REGISTRY_UNINSTALL_IDENTITIES: Readonly<Record<string, Readonly<{
     generatedDisplayName: 'K-Lite Codec Pack Full',
     registeredDisplayName: 'K-Lite Codec Pack Full',
     registeredRegistryKey: 'KLiteCodecPack_is1',
+  },
+  // Maestro's signed EXE wraps an MSI whose authoritative ProductCode is not
+  // published in the WinGet manifest. The wrapper updates that existing ARP
+  // key rather than adding a new display-name entry. Bind the reviewed key so
+  // both customer packages and QA verify and remove the exact MSI product.
+  'maestrosoft.maestroaarsoppgjoer.2025': {
+    generatedDisplayName: 'Maestro Årsoppgjør 2025',
+    registeredDisplayName: 'Maestro Årsoppgjør 2025',
+    registeredRegistryKey: '{20C36C0E-AF6D-4C46-AA1C-39080889BE9F}',
   },
 };
 
