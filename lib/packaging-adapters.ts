@@ -112,6 +112,14 @@ const SSMS_VISUAL_STUDIO_INSTALLER_WINGET_IDS = [
  */
 export const APPLICATION_PACKAGING_ADAPTERS: readonly ApplicationPackagingAdapter[] = [
   {
+    // Ava Desktop's NSIS bootstrapper installs below the invoking account's
+    // LocalAppData even though its WinGet manifest omits Scope. Running it as
+    // LocalSystem records a systemprofile uninstaller that is absent by the
+    // removal cycle. Keep the package in the intended signed-in user context.
+    wingetId: 'AvaCC.AvaDesktop',
+    requiredInstallScope: 'user',
+  },
+  {
     // Zalo's NSIS bootstrapper is per-user even though its WinGet manifest
     // currently omits Scope. Under LocalSystem it registers a disposable
     // systemprofile path and leaves no usable vendor uninstaller.
@@ -458,11 +466,13 @@ export const APPLICATION_PACKAGING_ADAPTERS: readonly ApplicationPackagingAdapte
     reviewedUninstallArguments: ['/S'],
   },
   {
-    // DesktopOK registers its own executable with the interactive
-    // -?uninstall argument. Reuse the vendor's documented /silent mode ahead
-    // of that exact removal verb so SYSTEM deployments do not exit without
-    // deleting the captured DesktopOK registration.
+    // DesktopOK publishes both user- and machine-scope installers. Intune runs
+    // Win32 packages as SYSTEM, and the reviewed exact uninstaller lives below
+    // Program Files, so keep package creation on the machine-scope variant.
+    // Reuse the vendor's documented /silent mode ahead of the registered
+    // -?uninstall verb so removal never waits for interactive UI.
     wingetId: 'SoftwareOK.DesktopOK',
+    requiredInstallScope: 'machine',
     reviewedExactUninstall: {
       executablePath: '%ProgramFiles%\\DesktopOK\\DesktopOK_x64.exe',
       arguments: ['/silent', '-?uninstall'],

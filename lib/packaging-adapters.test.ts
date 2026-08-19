@@ -110,6 +110,12 @@ describe('application packaging adapters', () => {
   });
 
   it('forces reviewed per-user installers out of the LocalSystem profile', () => {
+    expect(resolveApplicationInstallScope('AvaCC.AvaDesktop', 'machine')).toBe(
+      'user'
+    );
+    expect(resolveApplicationInstallScope(' avacc.avadesktop ', undefined)).toBe(
+      'user'
+    );
     expect(resolveApplicationInstallScope('VNGCorp.Zalo', 'machine')).toBe('user');
     expect(resolveApplicationInstallScope(' vngcorp.zalo ', undefined)).toBe('user');
     expect(resolveApplicationInstallScope('Youdao.YoudaoTranslate', 'machine')).toBe('user');
@@ -216,6 +222,9 @@ describe('application packaging adapters', () => {
       arguments: ['/silent', '-?uninstall'],
       completionTimeoutMinutes: 5,
     });
+    expect(resolveApplicationInstallScope('SoftwareOK.DesktopOK', 'user')).toBe(
+      'machine'
+    );
     expect(
       applyApplicationPackagingAdapter('SoftwareOK.Q-Dir', DEFAULT_PSADT_CONFIG)
         .reviewedUninstallArguments
