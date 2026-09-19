@@ -14,7 +14,7 @@ import type { PackagedWingetDependency } from '@/lib/winget-dependencies';
 
 export const QA_PSADT_TOOLCHAIN = {
   packagerRepository: 'ugurkocde/IntuneGet',
-  packagerCommit: 'cb3e4501fa7c4470330a1b6031dd5799fee8f9e4',
+  packagerCommit: 'e79da0398e3cf3c6874e53b6304a2aef54b5770f',
   packagerScriptPath: '.github/scripts/Create-PSADTPackage.ps1',
   psadtVersion: '4.1.8',
   templateUrl:
@@ -618,6 +618,9 @@ export const QA_PACKAGER_RELEASE_HISTORY = [
   // Zermelo's exact registry key changes only its failed identity profile.
   // Unchanged profiles retain compatibility, never exact-pin strict count credit.
   'bc329cb8bfafd8d2af940bdc9f8ccf044ac15146',
+  // Kiwix's exact registry identity changes only its previously failed
+  // lifecycle; compatibility never grants exact-current-pin strict count credit.
+  'cb3e4501fa7c4470330a1b6031dd5799fee8f9e4',
   QA_PSADT_TOOLCHAIN.packagerCommit,
 ] as const;
 
