@@ -25,14 +25,22 @@ export function rateLimitUntil(response, now = Date.now()) {
 export async function publicationJob(runId, github) {
   if (!/^[1-9][0-9]*$/.test(runId || '')) throw new Error('Invalid QA workflow run ID');
   const run = await github(`/actions/runs/${runId}`);
+  if (!run) throw new Error('Incomplete QA workflow evidence');
   if (String(run.id) !== runId || run.path !== '.github/workflows/intune-qa.yml' ||
       run.head_branch !== 'main' || run.event !== 'workflow_dispatch') throw new Error('QA workflow identity mismatch');
   if (run.status !== 'completed') return { waiting: true };
   const payload = await github(`/actions/runs/${runId}/jobs?filter=all&per_page=100`);
-  if (!Array.isArray(payload.jobs) || payload.total_count > 100) throw new Error('Incomplete QA job evidence');
+  if (!payload || !Array.isArray(payload.jobs) || payload.total_count > 100) throw new Error('Incomplete QA job evidence');
   const latest = name => payload.jobs.filter(j => j.name === name).sort((a, b) => a.id - b.id).at(-1);
   const qa = latest('qa');
   const publisher = latest('Publish compact app JSON');
+  const merged = publisher?.steps?.some(step => step.name === 'Merge result through protected branch' && step.conclusion === 'success');
+  const replaySafe = publisher?.steps?.some(step => step.name === 'Commit or reuse the compact result');
+  const legacyCommitFailed = publisher?.steps?.some(step => step.name === 'Commit the compact result' && step.conclusion === 'failure');
+  // Older inline workflows cannot skip a no-change commit after their PR merged.
+  // Replay them through a fresh lifecycle using current protected code instead
+  // of exhausting every publisher retry on the same non-idempotent git commit.
+  if (!replaySafe && (merged || legacyCommitFailed)) return { lifecycleRequired: true };
   // A job-specific rerun preserves completed VM evidence, including failures.
   // Failed lifecycle evidence must reach the normal fail-close reporter too.
   if (['success', 'failure'].includes(qa?.conclusion) && publisher?.status === 'completed' &&
@@ -73,7 +81,7 @@ export async function recoverInfrastructure({ rows, patch, github, now = Date.no
       continue;
     }
     if (otherWork.length || (c.test_config?.profileKind === 'catalog-default' &&
-        Date.parse(latestResult[0]?.tested_at_utc) > Date.parse(c.finished_at) && latestResult[0]?.tested_version !== c.version)) {
+        Date.parse(latestResult[0]?.tested_at_utc) > Date.parse(c.finished_at))) {
       if (!dryRun) await patch('qa_candidates', { id: `eq.${c.id}`, status: 'eq.error' }, {
         status: 'superseded', updated_at: new Date(now).toISOString(),
         failure_summary: 'A newer QA candidate or result already covers this application.',

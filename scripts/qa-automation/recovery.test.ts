@@ -53,9 +53,35 @@ describe('durable infrastructure recovery', () => {
     expect(d.github).not.toHaveBeenCalled();
     expect(d.patch).toHaveBeenCalledWith('qa_candidates', expect.anything(), expect.objectContaining({ status: 'superseded' }));
   });
+  it('never republishes stale catalog evidence over a newer result of the same version', async () => {
+    const candidate = { ...c, test_config: { profileKind: 'catalog-default' } };
+    const d = deps(candidate);
+    d.rows.mockImplementation(async (table, params) => table === 'qa_candidates' && params.status === 'eq.error' ? [candidate]
+      : table === 'qa_results' ? [{ tested_version: c.version, tested_at_utc: new Date(now).toISOString() }] as never : []);
+    expect(await recoverInfrastructure(d)).toMatchObject({ action: 'no_recovery_due' });
+    expect(d.github).not.toHaveBeenCalled();
+    expect(d.patch).toHaveBeenCalledWith('qa_candidates', expect.anything(), expect.objectContaining({ status: 'superseded' }));
+  });
   it('escalates an exhausted retry budget and rejects an untrusted workflow', async () => {
     expect(await recoverInfrastructure(deps({ ...c, recovery_attempts: 5 }))).toMatchObject({ action: 'recovery_exhausted', repairRequired: true });
     await expect(publicationJob('123', async () => ({ id: 123, event: 'push', path: 'wrong.yml' }))).rejects.toThrow('identity mismatch');
+  });
+  it('rejects empty successful GET responses as incomplete evidence', async () => {
+    await expect(publicationJob('123', async () => null)).rejects.toThrow('Incomplete QA workflow evidence');
+    await expect(publicationJob('123', async path => path.includes('/jobs?') ? null : {
+      id: 123, event: 'workflow_dispatch', path: '.github/workflows/intune-qa.yml', head_branch: 'main', status: 'completed',
+    })).rejects.toThrow('Incomplete QA job evidence');
+  });
+  it('uses a fresh lifecycle for legacy post-merge failures, but permits idempotent publishers', async () => {
+    const run = { id: 123, event: 'workflow_dispatch', path: '.github/workflows/intune-qa.yml', head_branch: 'main', status: 'completed' };
+    const steps = [{ name: 'Merge result through protected branch', conclusion: 'success' }];
+    const github = async (path: string) => path.includes('/jobs?') ? { total_count: 2, jobs: [
+      { name: 'qa', conclusion: 'success' },
+      { name: 'Publish compact app JSON', id: 456, status: 'completed', conclusion: 'failure', steps },
+    ] } : run;
+    expect(await publicationJob('123', github)).toEqual({ lifecycleRequired: true });
+    steps.push({ name: 'Commit or reuse the compact result', conclusion: 'success' });
+    expect(await publicationJob('123', github)).toEqual({ jobId: 456 });
   });
   it('honors GitHub reset/Retry-After headers and caps exponential delays', () => {
     const response = new Response('', { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String((now + 3600000) / 1000) } });
